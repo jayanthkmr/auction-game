@@ -229,6 +229,13 @@ window.addEventListener("load", () => {
   // Request initial leaderboard data
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "REQUEST_LEADERBOARD" }));
+  } else {
+    // If websocket isn't ready, wait and try again
+    setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "REQUEST_LEADERBOARD" }));
+      }
+    }, 1000);
   }
 });
 
@@ -249,6 +256,9 @@ function connectWebSocket() {
   ws.onopen = () => {
     console.log("WebSocket connected");
     showStatus("Connected to game server");
+    
+    // Request leaderboard data on connection
+    ws.send(JSON.stringify({ type: "REQUEST_LEADERBOARD" }));
   };
   
   ws.onmessage = (msgEvent) => {
@@ -284,13 +294,69 @@ function handleServerMessage(data) {
 
     // Player login success
     case "LOGIN_SUCCESS":
-      myPlayerName = data.playerName;
-      loggedIn = true;
-      isAudience = false;
-      gameState.myMoney = data.money;
-      showBidsMode = data.showBidsMode;
+      const isHumanLogin = !data.isAI;
       
-      // Disable the checkbox for second player
+      if (isHumanLogin) {
+        myPlayerName = data.playerName;
+        loggedIn = true;
+        isAudience = false;
+        gameState = {
+          turnNumber: 1,
+          maxTurns: 5,
+          myMoney: data.money,
+          lastBid: 0,
+          isGameOver: false
+        };
+        showBidsMode = data.showBidsMode;
+        
+        // Update UI for human player
+        document.getElementById("loginPanel").style.display = "none";
+        document.getElementById("audiencePanel").style.display = "none";
+        document.getElementById("gamePanel").style.display = "block";
+        document.getElementById("playerNameSpan").textContent = myPlayerName;
+        
+        // Show initial money and turn number
+        const myStatsDiv = document.getElementById("myStats");
+        myStatsDiv.textContent = `Your Money: $${gameState.myMoney} | Last Bid: $0`;
+        
+        // Update turn display
+        const turnDisplay = document.getElementById("turnDisplay");
+        if (turnDisplay) {
+          turnDisplay.textContent = `Turn ${gameState.turnNumber} of ${gameState.maxTurns}`;
+        }
+
+        // Update bid input max
+        const bidInput = document.getElementById("bidInput");
+        if (bidInput) {
+          bidInput.max = gameState.myMoney;
+          const bidLabel = document.querySelector('label[for="bidInput"]');
+          if (bidLabel) {
+            bidLabel.textContent = `Your Bid (max $${gameState.myMoney}): `;
+          }
+        }
+
+        showStatus(`Logged in with $${gameState.myMoney}`);
+
+        // If there's a pending AI login, send it now
+        if (window.pendingAILogin) {
+          setTimeout(() => {
+            ws.send(JSON.stringify(window.pendingAILogin));
+            window.pendingAILogin = null;
+          }, 500);
+        }
+      } else {
+        // For AI logins, store the player names
+        if (data.playerName === AI_NAMES.CLAUDE) {
+          p1Name = data.playerName;
+        } else if (data.playerName === AI_NAMES.GPT4) {
+          p2Name = data.playerName;
+        }
+        // Redraw the canvas to show updated names
+        drawBaseline(scotchPosition);
+      }
+      console.log("Login success:", { myPlayerName, p1Name, p2Name, gameState });
+      
+      // Handle checkbox state
       const showBidsCheck = document.getElementById("showBidsCheck");
       if (!data.isFirstPlayer) {
         showBidsCheck.disabled = true;
@@ -298,23 +364,6 @@ function handleServerMessage(data) {
         showBidsCheck.parentElement.style.opacity = "0.5";
         showBidsCheck.parentElement.title = "Only first player can set this option";
       }
-      
-      document.getElementById("loginPanel").style.display = "none";
-      document.getElementById("audiencePanel").style.display = "none";
-      document.getElementById("gamePanel").style.display = "block";
-      
-      // Update greeting message based on game mode
-      const gameMode = document.querySelector('input[name="gameMode"]:checked')?.value;
-      if (gameMode === 'ai_vs_ai') {
-        document.getElementById("playerNameSpan").textContent = "AI Match (Spectator)";
-      } else {
-        document.getElementById("playerNameSpan").textContent = myPlayerName;
-      }
-      
-      // Show initial money
-      const myStatsDiv = document.getElementById("myStats");
-      myStatsDiv.textContent = `Your Money: $${gameState.myMoney}  |  Last Bid: $0`;
-      showStatus(`Logged in with $${gameState.myMoney}`);
       break;
 
     // Audience just joined
@@ -343,38 +392,36 @@ function handleServerMessage(data) {
 
     // Turn resolved => animate scotch
     case "TURN_RESOLVED":
-      {
-        const { scotchPosition: newPos, oldPosition, gameOver, turnNumber, maxTurns, winner, p1Bid, p2Bid } = data;
-        gameState.turnNumber = turnNumber;
-        gameState.maxTurns = maxTurns;
-        gameState.isGameOver = gameOver;
-
-        // Update turn counter in UI
-        document.getElementById("currentTurn").textContent = turnNumber;
-        document.getElementById("maxTurns").textContent = maxTurns;
-
-        // Show bids if mode is enabled
-        if (showBidsMode) {
-          showStatus(`Turn ${turnNumber}/${maxTurns}: ${p1Name} bid $${p1Bid}, ${p2Name} bid $${p2Bid}`);
-        }
-        
-        // Then show who won
-        const winnerName = winner === 1 ? p1Name : p2Name;
-        showStatus(`${winnerName} won the turn!`);
-        
-        requestAnimationFrame(() => {
-          animateScotchMove(oldPosition, newPos, () => {
-            scotchPosition = newPos;
-            if (gameOver) {
-              const finalWinner = scotchPosition <= 0 ? p1Name : 
-                                scotchPosition >= 10 ? p2Name : 
-                                p1Name;  // Default to p1 if max turns reached
-              showStatus(`🏆 ${finalWinner} WINS THE GAME! 🏆`);
-              showWinnerPopup(finalWinner);
-            }
-          });
-        });
+      console.log("Turn resolved:", data);
+      gameState.turnNumber = data.turnNumber;
+      gameState.maxTurns = data.maxTurns;
+      const oldPos = scotchPosition;
+      scotchPosition = data.scotchPosition;
+      
+      // Update turn display
+      const turnDisplay = document.getElementById("turnDisplay");
+      if (turnDisplay) {
+        turnDisplay.textContent = `Turn ${gameState.turnNumber} of ${gameState.maxTurns}`;
       }
+
+      // Show turn result in status
+      const winnerName = data.winner === 1 ? p1Name : p2Name;
+      if (data.tieUsed) {
+        showStatus(`Tie! ${winnerName} won due to advantage`);
+      } else {
+        showStatus(`${winnerName} won the turn!`);
+      }
+
+      // Show bid information if enabled
+      if (showBidsMode) {
+        showStatus(`${p1Name} bid: $${data.p1Bid}, ${p2Name} bid: $${data.p2Bid}`);
+      }
+      
+      animateScotchMove(oldPos, scotchPosition, () => {
+        if (data.gameOver) {
+          gameState.isGameOver = true;
+        }
+      });
       break;
 
     // This server->client message means forced 0 for missing player
@@ -384,27 +431,64 @@ function handleServerMessage(data) {
 
     // Private update to me about my money + bid
     case "PLAYER_UPDATE":
-      if (!isAudience) {
+      console.log("Player update for", myPlayerName, ":", data);
+      // Only update if this is for the human player
+      if (!isAudience && myPlayerName && !data.isAI) {
+        // Store previous values for logging
+        const prevMoney = gameState.myMoney;
+        const prevBid = gameState.lastBid;
+        
+        // Update game state
         gameState.myMoney = data.money;
         gameState.lastBid = data.lastBid;
         
+        // Update human stats display
         const myStatsDiv = document.getElementById("myStats");
-        myStatsDiv.textContent = `Your Money: $${data.money}  |  Last Bid: $${data.lastBid || 0}`;
+        if (myStatsDiv) {
+          myStatsDiv.textContent = `Your Money: $${gameState.myMoney} | Last Bid: $${gameState.lastBid || 0}`;
+        }
         
-        // Update the bid input label with new max
-        if (updateBidLabel) updateBidLabel();
+        // Update the bid input max value
+        const bidInput = document.getElementById("bidInput");
+        if (bidInput) {
+          bidInput.max = gameState.myMoney;
+          // Update the label to show current max bid
+          const bidLabel = document.querySelector('label[for="bidInput"]');
+          if (bidLabel) {
+            bidLabel.textContent = `Your Bid (max $${gameState.myMoney}): `;
+          }
+        }
+        
+        console.log("Updated human player stats:", {
+          player: myPlayerName,
+          moneyChange: `${prevMoney} -> ${gameState.myMoney}`,
+          bidChange: `${prevBid} -> ${gameState.lastBid}`,
+          currentState: gameState
+        });
       }
       break;
 
     // Show who has/have not submitted
     case "BID_STATUS":
-      p1Name = data.p1Name;
-      p2Name = data.p2Name;
-      updateBidStatus(data);
-      // Add turn number if available
-      if (data.turnNumber) {
-        showStatus(`Turn ${data.turnNumber}: Waiting for players to submit bids...`);
+      console.log("Bid status:", data);
+      const p1Status = data.p1Submitted ? "✓" : "❌";
+      const p2Status = data.p2Submitted ? "✓" : "❌";
+      
+      // Update player names if not set
+      if (data.p1Name) p1Name = data.p1Name;
+      if (data.p2Name) p2Name = data.p2Name;
+      
+      // Only show status for the current player and their opponent
+      if (myPlayerName === data.p1Name) {
+        showStatus(`${p1Status} You have ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} ${data.p2Name} has ${data.p2Submitted ? "" : "NOT "}submitted`);
+      } else if (myPlayerName === data.p2Name) {
+        showStatus(`${p1Status} ${data.p1Name} has ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} You have ${data.p2Submitted ? "" : "NOT "}submitted`);
+      } else {
+        showStatus(`${p1Status} ${data.p1Name} has ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} ${data.p2Name} has ${data.p2Submitted ? "" : "NOT "}submitted`);
       }
+
+      // Redraw canvas to show updated names
+      drawBaseline(scotchPosition);
       break;
 
     // Full game over with replay info
@@ -425,6 +509,9 @@ function handleServerMessage(data) {
         showStatus(`Rating changes:`);
         showStatus(`${winner.name}: +${winner.ratingChange} (${Math.round(winner.newRating)})`);
         showStatus(`${loser.name}: ${loser.ratingChange} (${Math.round(loser.newRating)})`);
+
+        // Always show winner popup, even in AI vs AI mode
+        showWinnerPopup(winner.name);
       }
       
       // If there's a disconnect field, show that
@@ -498,26 +585,29 @@ function loginAsPlayer() {
     return;
   }
 
-  // Handle human vs AI or human vs human
-  ws.send(JSON.stringify({
+  // For human vs AI or human vs human, always log in human first
+  const humanLogin = {
     type: "LOGIN",
     playerName: name,
     passcode: pass,
     showBids: showBidsCheck.checked,
-    isAI: false
-  }));
+    isAI: false,
+    isFirstPlayer: true
+  };
 
-  // If playing against AI, automatically log in the AI opponent
+  // Send human login first
+  ws.send(JSON.stringify(humanLogin));
+
+  // If playing against AI, log in AI after human login success
   if (gameMode !== 'human') {
-    setTimeout(() => {
-      ws.send(JSON.stringify({
-        type: "LOGIN",
-        playerName: gameMode === 'claude' ? AI_NAMES.CLAUDE : AI_NAMES.GPT4,
-        passcode: pass,
-        isAI: true,
-        aiType: gameMode === 'claude' ? 'claude' : 'openai'
-      }));
-    }, 500);
+    // Store AI login details to be sent after human login success
+    window.pendingAILogin = {
+      type: "LOGIN",
+      playerName: gameMode === 'claude' ? AI_NAMES.CLAUDE : AI_NAMES.GPT4,
+      passcode: pass,
+      isAI: true,
+      aiType: gameMode === 'claude' ? 'claude' : 'openai'
+    };
   }
 }
 
@@ -537,8 +627,9 @@ function setupBidFieldMask() {
 
   // Update the label to show max $100 at start or current money during game
   function updateBidLabel() {
-    const maxBid = gameState.turnNumber === 0 ? 100 : gameState.myMoney;
+    const maxBid = gameState.myMoney;
     bidLabel.textContent = `Your Bid (max $${maxBid}): `;
+    bidInput.max = maxBid;
   }
   updateBidLabel();
 
@@ -548,9 +639,11 @@ function setupBidFieldMask() {
     const numericVal = newVal.replace(/[^0-9]/g, '');
     
     if (numericVal.length > 0) {
-      realBidValue = numericVal;
-      // Show the actual number instead of asterisks
-      e.target.value = numericVal;
+      const maxBid = gameState.myMoney;
+      const validatedBid = Math.min(parseInt(numericVal), maxBid);
+      realBidValue = validatedBid.toString();
+      e.target.value = validatedBid.toString();
+      console.log("Bid input:", { value: validatedBid, maxBid, money: gameState.myMoney });
     } else {
       realBidValue = "";
       e.target.value = "";
@@ -564,21 +657,25 @@ function setupBidFieldMask() {
     }
   });
 
-  // Update label when money changes
   return updateBidLabel;
 }
-
-// Store the update function
-let updateBidLabel;
 
 function submitBid() {
   if (!loggedIn || isAudience) return;
   
   const bidInt = parseInt(realBidValue || "0", 10);
+  const maxBid = gameState.myMoney;
+  
+  console.log("Human player submitting bid:", { 
+    player: myPlayerName,
+    bid: bidInt, 
+    maxBid, 
+    currentMoney: gameState.myMoney 
+  });
   
   // Validate bid against current money
-  if (bidInt > gameState.myMoney) {
-    showStatus(`Error: Bid ($${bidInt}) exceeds your money ($${gameState.myMoney})`);
+  if (bidInt > maxBid) {
+    showStatus(`Error: Bid ($${bidInt}) exceeds maximum allowed bid ($${maxBid})`);
     return;
   }
   
@@ -590,6 +687,7 @@ function submitBid() {
       type: "SUBMIT_BID",
       playerName: myPlayerName,
       bid: bidInt,
+      isHuman: true
     })
   );
   realBidValue = "";
@@ -609,30 +707,6 @@ function showStatus(msg) {
   
   // Also log to console for debugging
   console.log("Status:", msg);
-}
-
-//////////////////////////////////////////////////
-// Show if other player has submitted
-//////////////////////////////////////////////////
-function updateBidStatus(data) {
-  if (!loggedIn || isAudience) {
-    showStatus(`Bid Status - ${data.p1Name}: ${data.p1Submitted ? "✓" : "..."}, ${data.p2Name}: ${data.p2Submitted ? "✓" : "..."}`);
-    return;
-  }
-
-  let me, other;
-  if (data.p1Name === myPlayerName) {
-    me = { name: data.p1Name, submitted: data.p1Submitted };
-    other = { name: data.p2Name, submitted: data.p2Submitted };
-  } else {
-    me = { name: data.p2Name, submitted: data.p2Submitted };
-    other = { name: data.p1Name, submitted: data.p1Submitted };
-  }
-
-  const meSubText = me.submitted ? `✓ ${me.name} has submitted` : `❌ ${me.name} has NOT submitted`;
-  const otherSubText = other.submitted ? `✓ ${other.name} has submitted` : `❌ ${other.name} has NOT submitted`;
-
-  document.getElementById("otherPlayerStatus").textContent = `${meSubText} | ${otherSubText}`;
 }
 
 //////////////////////////////////////////////////
@@ -774,12 +848,17 @@ function showWinnerPopup(winnerName) {
   }, 5000);
 }
 
-// Add this function to update the leaderboard display
+// Update leaderboard display function
 function updateLeaderboardDisplay(leaderboard) {
   const tbody = document.querySelector("#leaderboardTable tbody");
+  if (!tbody) return; // Guard against missing table
+  
   tbody.innerHTML = "";
   
-  leaderboard.forEach((player, index) => {
+  // Sort leaderboard by rating
+  const sortedLeaderboard = [...leaderboard].sort((a, b) => b.rating - a.rating);
+  
+  sortedLeaderboard.forEach((player, index) => {
     const row = document.createElement("tr");
     
     // Add rank with medal for top 3
@@ -796,6 +875,7 @@ function updateLeaderboardDisplay(leaderboard) {
     nameCell.textContent = player.name;
     if (player.name === myPlayerName) {
       nameCell.style.fontWeight = "bold";
+      nameCell.style.color = "#ffcc00";
     }
     
     // Add rating with change if available
@@ -823,11 +903,21 @@ function updateLeaderboardDisplay(leaderboard) {
     const gamesCell = document.createElement("td");
     gamesCell.textContent = player.gamesPlayed;
     
+    // Add win rate percentage if they've played games
+    const winRateCell = document.createElement("td");
+    if (player.gamesPlayed > 0) {
+      const winRate = (player.wins / player.gamesPlayed * 100).toFixed(1);
+      winRateCell.textContent = `${winRate}%`;
+    } else {
+      winRateCell.textContent = "-";
+    }
+    
     row.appendChild(rankCell);
     row.appendChild(nameCell);
     row.appendChild(ratingCell);
     row.appendChild(recordCell);
     row.appendChild(gamesCell);
+    row.appendChild(winRateCell);
     
     tbody.appendChild(row);
   });

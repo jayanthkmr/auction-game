@@ -136,6 +136,18 @@
       box-shadow: 0 0 20px rgba(255, 204, 0, 0.2);
     }
 
+    /* Turn display */
+    #turnDisplay {
+      text-align: center;
+      font-family: 'Press Start 2P', monospace;
+      color: #ffcc00;
+      margin: 15px 0;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 4px;
+      border: 1px solid #ffcc00;
+    }
+
     /* Status areas */
     #myStats, #otherPlayerStatus, #statusArea {
       background: rgba(0, 0, 0, 0.3);
@@ -273,6 +285,9 @@
 
 <h1>🥃 Scotch Auction Game</h1>
 
+<!-- Add turn display -->
+<div id="turnDisplay">Turn 1 of 5</div>
+
 <!-- Game Rules Panel -->
 <div id="rulesPanel" class="panel">
   <h3>📜 Game Rules</h3>
@@ -387,6 +402,7 @@
           <th>Rating</th>
           <th>W/L</th>
           <th>Games</th>
+          <th>Win Rate</th>
         </tr>
       </thead>
       <tbody>
