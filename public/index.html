@@ -211,6 +211,62 @@
       background: rgba(0, 0, 0, 0.2);
       border-radius: 8px;
     }
+
+    #leaderboardTable {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    #leaderboardTable th,
+    #leaderboardTable td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 204, 0, 0.2);
+    }
+
+    #leaderboardTable th {
+      background: rgba(255, 204, 0, 0.2);
+      font-weight: bold;
+      color: #ffcc00;
+    }
+
+    #leaderboardTable tr:hover {
+      background: rgba(255, 204, 0, 0.1);
+    }
+
+    #leaderboardTable tr:last-child td {
+      border-bottom: none;
+    }
+
+    .rating-change {
+      font-size: 0.8em;
+      margin-left: 8px;
+    }
+
+    .rating-up {
+      color: #33ff33;
+    }
+
+    .rating-down {
+      color: #ff3333;
+    }
+
+    .player-rank-1 {
+      font-weight: bold;
+      color: #ffcc00;
+    }
+
+    .player-rank-2 {
+      color: #cccccc;
+    }
+
+    .player-rank-3 {
+      color: #cd7f32;
+    }
   </style>
 </head>
 <body>
@@ -300,6 +356,26 @@
     <h3>🎬 Game Replay</h3>
     <button onclick="startReplay()">View Turn-by-Turn Replay</button>
     <div id="replayMessages"></div>
+  </div>
+</div>
+
+<div id="leaderboardPanel" class="panel">
+  <h3>🏆 Leaderboard</h3>
+  <div id="leaderboardContent">
+    <table id="leaderboardTable">
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Player</th>
+          <th>Rating</th>
+          <th>W/L</th>
+          <th>Games</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Filled dynamically -->
+      </tbody>
+    </table>
   </div>
 </div>
 

@@ -7,6 +7,7 @@ const path = require("path");
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
+const fs = require('fs');
 
 //////////////////////////////////
 // Basic Setup
@@ -60,6 +61,19 @@ const players = {}; // up to 2
 // players[playerName] = { passcode, ws, money, hasSubmitted, lastBid, name }
 
 const audience = []; // watchers
+
+// ELO Rating Constants
+const K_FACTOR = 32;
+const DEFAULT_RATING = 1200;
+
+// Load leaderboard data
+let leaderboardData;
+try {
+  leaderboardData = JSON.parse(fs.readFileSync('leaderboard.json', 'utf8'));
+} catch (err) {
+  leaderboardData = { players: {} };
+  fs.writeFileSync('leaderboard.json', JSON.stringify(leaderboardData, null, 2));
+}
 
 function initGame() {
   console.log("Initializing game state...");
@@ -202,6 +216,99 @@ function resolveTurn() {
     p2.lastBid = 0;
     broadcastBidStatus();
   }
+}
+
+//////////////////////////////////
+// ELO Calculations
+//////////////////////////////////
+function calculateEloRating(winnerRating, loserRating) {
+  const expectedScore = 1 / (1 + Math.pow(10, (loserRating - winnerRating) / 400));
+  const ratingChange = Math.round(K_FACTOR * (1 - expectedScore));
+  return ratingChange;
+}
+
+function updatePlayerStats(playerName, won) {
+  if (!leaderboardData.players[playerName]) {
+    leaderboardData.players[playerName] = {
+      rating: DEFAULT_RATING,
+      wins: 0,
+      losses: 0,
+      gamesPlayed: 0
+    };
+  }
+  
+  const player = leaderboardData.players[playerName];
+  player.gamesPlayed++;
+  if (won) {
+    player.wins++;
+  } else {
+    player.losses++;
+  }
+}
+
+function updateLeaderboard(winner, loser) {
+  // Get or create player ratings
+  if (!leaderboardData.players[winner]) {
+    leaderboardData.players[winner] = {
+      rating: DEFAULT_RATING,
+      wins: 0,
+      losses: 0,
+      gamesPlayed: 0
+    };
+  }
+  if (!leaderboardData.players[loser]) {
+    leaderboardData.players[loser] = {
+      rating: DEFAULT_RATING,
+      wins: 0,
+      losses: 0,
+      gamesPlayed: 0
+    };
+  }
+
+  const winnerRating = leaderboardData.players[winner].rating;
+  const loserRating = leaderboardData.players[loser].rating;
+
+  // Calculate rating changes
+  const ratingChange = calculateEloRating(winnerRating, loserRating);
+
+  // Update ratings
+  leaderboardData.players[winner].rating += ratingChange;
+  leaderboardData.players[loser].rating -= ratingChange;
+
+  // Update win/loss stats
+  updatePlayerStats(winner, true);
+  updatePlayerStats(loser, false);
+
+  // Save to file
+  fs.writeFileSync('leaderboard.json', JSON.stringify(leaderboardData, null, 2));
+
+  // Return updated ratings for display
+  return {
+    winner: {
+      name: winner,
+      newRating: leaderboardData.players[winner].rating,
+      ratingChange: ratingChange
+    },
+    loser: {
+      name: loser,
+      newRating: leaderboardData.players[loser].rating,
+      ratingChange: -ratingChange
+    }
+  };
+}
+
+function broadcastLeaderboard() {
+  const sortedPlayers = Object.entries(leaderboardData.players)
+    .map(([name, stats]) => ({
+      name,
+      ...stats
+    }))
+    .sort((a, b) => b.rating - a.rating);
+
+  broadcastAll({
+    type: "LEADERBOARD_UPDATE",
+    leaderboard: sortedPlayers
+  });
 }
 
 //////////////////////////////////
@@ -356,6 +463,10 @@ wss.on("connection", (ws) => {
         break;
       }
 
+      case "REQUEST_LEADERBOARD":
+        handleLeaderboardRequest(ws);
+        break;
+
       default:
         // Possibly handle SUBMIT_BID or other messages
         console.log("Received message of type:", data.type);
@@ -387,3 +498,17 @@ wss.on("connection", (ws) => {
     }
   });
 });
+
+function handleLeaderboardRequest(ws) {
+  const sortedPlayers = Object.entries(leaderboardData.players)
+    .map(([name, stats]) => ({
+      name,
+      ...stats
+    }))
+    .sort((a, b) => b.rating - a.rating);
+
+  ws.send(JSON.stringify({
+    type: "LEADERBOARD_UPDATE",
+    leaderboard: sortedPlayers
+  }));
+}

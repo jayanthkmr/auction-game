@@ -43,6 +43,9 @@ const MAX_TURNS = 5;  // Match server's MAX_TURNS
 // Add at the top with other state variables
 let showBidsMode = false;
 
+// Add to your existing state variables at the top
+let lastRatingChanges = null;
+
 //////////////////////////////////////////////////
 // Setup Canvas & Scotch Image
 //////////////////////////////////////////////////
@@ -216,6 +219,11 @@ window.addEventListener("load", () => {
   drawBaseline(scotchPosition);
   connectWebSocket();
   updateBidLabel = setupBidFieldMask();
+  
+  // Request initial leaderboard data
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "REQUEST_LEADERBOARD" }));
+  }
 });
 
 //////////////////////////////////////////////////
@@ -391,6 +399,13 @@ function handleServerMessage(data) {
       finalTurnHistory = data.turnHistory;
       showStatus("Game Over!");
       document.getElementById("replaySection").style.display = "block";
+      // Store rating changes for leaderboard display
+      if (data.ratingChanges) {
+        lastRatingChanges = data.ratingChanges;
+        const winner = data.ratingChanges.winner;
+        const loser = data.ratingChanges.loser;
+        showStatus(`Rating changes: ${winner.name} +${winner.ratingChange}, ${loser.name} ${loser.ratingChange}`);
+      }
       // If there's a disconnect field, show that
       if (data.disconnect) {
         showStatus(`Player [${data.disconnect}] disconnected. Game ended.`);
@@ -400,6 +415,10 @@ function handleServerMessage(data) {
     // Bid error
     case "BID_ERROR":
       showStatus(`Error: ${data.message}`);
+      break;
+
+    case "LEADERBOARD_UPDATE":
+      updateLeaderboardDisplay(data.leaderboard);
       break;
 
     default:
@@ -688,4 +707,63 @@ function showWinnerPopup(winnerName) {
       document.body.removeChild(popup);
     }
   }, 5000);
+}
+
+// Add this function to update the leaderboard display
+function updateLeaderboardDisplay(leaderboard) {
+  const tbody = document.querySelector("#leaderboardTable tbody");
+  tbody.innerHTML = "";
+  
+  leaderboard.forEach((player, index) => {
+    const row = document.createElement("tr");
+    
+    // Add rank with medal for top 3
+    const rankCell = document.createElement("td");
+    let rankText = (index + 1).toString();
+    if (index === 0) rankText = "🥇 " + rankText;
+    else if (index === 1) rankText = "🥈 " + rankText;
+    else if (index === 2) rankText = "🥉 " + rankText;
+    rankCell.textContent = rankText;
+    rankCell.className = `player-rank-${index + 1}`;
+    
+    // Add player name
+    const nameCell = document.createElement("td");
+    nameCell.textContent = player.name;
+    if (player.name === myPlayerName) {
+      nameCell.style.fontWeight = "bold";
+    }
+    
+    // Add rating with change if available
+    const ratingCell = document.createElement("td");
+    ratingCell.textContent = Math.round(player.rating);
+    if (lastRatingChanges) {
+      if (player.name === lastRatingChanges.winner?.name) {
+        const change = document.createElement("span");
+        change.className = "rating-change rating-up";
+        change.textContent = ` (+${lastRatingChanges.winner.ratingChange})`;
+        ratingCell.appendChild(change);
+      } else if (player.name === lastRatingChanges.loser?.name) {
+        const change = document.createElement("span");
+        change.className = "rating-change rating-down";
+        change.textContent = ` (${lastRatingChanges.loser.ratingChange})`;
+        ratingCell.appendChild(change);
+      }
+    }
+    
+    // Add win/loss record
+    const recordCell = document.createElement("td");
+    recordCell.textContent = `${player.wins}/${player.losses}`;
+    
+    // Add games played
+    const gamesCell = document.createElement("td");
+    gamesCell.textContent = player.gamesPlayed;
+    
+    row.appendChild(rankCell);
+    row.appendChild(nameCell);
+    row.appendChild(ratingCell);
+    row.appendChild(recordCell);
+    row.appendChild(gamesCell);
+    
+    tbody.appendChild(row);
+  });
 }
