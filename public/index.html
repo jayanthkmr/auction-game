@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Scotch Auction (Audience + Timer + Status)</title>
+
+  <!-- Example of a retro-ish gaming font from Google Fonts -->
+  <link
+    href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+    rel="stylesheet"
+  />
+
+  <style>
+    /* Global reset / box-sizing */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* Body with a retro vibe */
+    body {
+      font-family: 'Press Start 2P', monospace, sans-serif;
+      background: linear-gradient(135deg, #220055 0%, #330066 100%);
+      color: #fff;
+      padding: 20px;
+    }
+
+    h1, h2, h3 {
+      margin-bottom: 10px;
+      color: #ffcc00;
+      text-shadow: 2px 2px #000;
+    }
+
+    /* Panel / section containers */
+    .panel {
+      background: rgba(0, 0, 0, 0.4);
+      border: 2px solid #ffcc00;
+      border-radius: 8px;
+      padding: 15px 20px;
+      margin-bottom: 20px;
+    }
+
+    #loginPanel, #gamePanel, #audiencePanel {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    label {
+      display: inline-block;
+      margin-right: 10px;
+      margin-bottom: 10px;
+      font-size: 14px;
+      color: #fff;
+    }
+
+    input[type="text"],
+    input[type="password"] {
+      font-family: inherit;
+      font-size: 14px;
+      padding: 4px 6px;
+      border: 1px solid #ffcc00;
+      border-radius: 4px;
+      outline: none;
+      background-color: #222;
+      color: #ffcc00;
+      margin-left: 4px;
+      margin-right: 8px;
+    }
+
+    /* Our "game" style buttons */
+    button {
+      font-family: inherit;
+      font-size: 14px;
+      color: #000;
+      background-color: #ffcc00;
+      border: 2px solid #ffcc00;
+      border-radius: 4px;
+      padding: 6px 12px;
+      cursor: pointer;
+      box-shadow: 2px 2px #000;
+      transition: transform 0.1s;
+      margin-left: 5px;
+    }
+    button:hover {
+      background-color: #ffc600;
+    }
+    button:active {
+      transform: translate(2px, 2px);
+      box-shadow: none;
+    }
+    button:disabled {
+      background-color: #aaa;
+      color: #666;
+      border: 2px solid #aaa;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    #loginError {
+      color: #ff5555;
+      margin-top: 8px;
+      min-height: 16px;
+      display: block;
+    }
+
+    /* Canvas styling */
+    #gameCanvas {
+      display: block;
+      margin: 15px auto;
+      border: 2px solid #ffcc00;
+      background-color: #110033;
+      border-radius: 8px;
+    }
+
+    /* The "bidField" input */
+    input.bidField {
+      width: 80px;
+      font-size: 14px;
+      font-family: 'Press Start 2P', monospace;
+      text-align: center;
+    }
+
+    /* Additional info and status area */
+    #myStats, #otherPlayerStatus, #statusArea {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px dashed #ffcc00;
+      padding: 8px;
+      margin-top: 10px;
+      border-radius: 8px;
+      min-height: 50px;
+      white-space: pre-wrap;
+    }
+
+    /* Replay section */
+    #replaySection {
+      margin-top: 20px;
+      text-align: center;
+    }
+    #replayMessages {
+      margin-top: 10px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px dashed #ffcc00;
+      padding: 8px;
+      min-height: 60px;
+      border-radius: 8px;
+      max-height: 200px;
+      overflow-y: auto; /* scroll if needed */
+    }
+  </style>
+</head>
+<body>
+
+<h1>Scotch Auction Game</h1>
+
+<!-- Player Login Panel -->
+<div id="loginPanel" class="panel">
+  <h3>Login as Player</h3>
+  <label>Player Name:
+    <input id="nameInput" type="text" />
+  </label>
+  <label>Game Passcode:
+    <input id="passInput" type="password" />
+  </label>
+  <div style="margin: 10px 0;">
+    <label style="cursor: pointer;" title="First player sets this option for the game">
+      <input type="checkbox" id="showBidsCheck" /> Show all bids after each turn
+    </label>
+  </div>
+  <button onclick="loginAsPlayer()">Login</button>
+  <span id="loginError"></span>
+</div>
+
+<!-- Audience Join Panel -->
+<div id="audiencePanel" class="panel">
+  <h3>Or Join as Audience</h3>
+  <button onclick="joinAsAudience()">Join as Audience</button>
+</div>
+
+<!-- Main Game Panel -->
+<div id="gamePanel" class="panel" style="display:none;">
+  <h2>Welcome, <span id="playerNameSpan"></span>!</h2>
+
+  <canvas id="gameCanvas" width="600" height="200"></canvas>
+  
+  <div>
+    <label for="bidInput">Your Bid (max $100): </label>
+    <input id="bidInput" class="bidField" type="text" />
+    <button onclick="submitBid()">Submit Bid</button>
+  </div>
+  
+  <div id="myStats"></div>
+  <div id="otherPlayerStatus"></div>
+  <div id="statusArea"></div>
+  
+  <div id="replaySection" style="display:none;">
+    <h3>Game Replay</h3>
+    <button onclick="startReplay()">View Turn-by-Turn Replay</button>
+    <div id="replayMessages"></div>
+  </div>
+</div>
+
+<script src="client.js"></script>
+</body>
+</html>
