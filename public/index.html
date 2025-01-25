@@ -164,6 +164,53 @@
     .active-game {
       animation: glow 2s infinite;
     }
+
+    #replayMessages {
+      margin-top: 10px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px dashed #ffcc00;
+      padding: 15px;
+      min-height: 60px;
+      border-radius: 8px;
+      max-height: 400px;
+      overflow-y: auto;
+      white-space: pre-line;
+      font-family: monospace;
+      line-height: 1.5;
+      color: #fff;
+    }
+
+    .replay-turn {
+      margin-bottom: 20px;
+      padding: 10px;
+      background: rgba(255, 204, 0, 0.1);
+      border-radius: 4px;
+    }
+
+    .replay-separator {
+      border-top: 1px dashed #ffcc00;
+      margin: 15px 0;
+    }
+
+    .turn-counter {
+      background: rgba(255, 204, 0, 0.2);
+      padding: 10px;
+      border-radius: 4px;
+      display: inline-block;
+      margin-right: 20px;
+      font-size: 0.9em;
+      vertical-align: middle;
+    }
+
+    .bid-section {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      margin: 20px 0;
+      padding: 15px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+    }
   </style>
 </head>
 <body>
@@ -239,6 +286,7 @@
   <canvas id="gameCanvas" width="600" height="200"></canvas>
   
   <div class="bid-section">
+    <h3 class="turn-counter">Turn <span id="currentTurn">1</span>/<span id="maxTurns">5</span></h3>
     <label for="bidInput">Your Bid (max $100): </label>
     <input id="bidInput" class="bidField" type="text" placeholder="Enter bid amount" />
     <button onclick="submitBid()">Place Bid 💰</button>

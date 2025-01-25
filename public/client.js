@@ -328,6 +328,10 @@ function handleServerMessage(data) {
         gameState.maxTurns = maxTurns;
         gameState.isGameOver = gameOver;
 
+        // Update turn counter in UI
+        document.getElementById("currentTurn").textContent = turnNumber;
+        document.getElementById("maxTurns").textContent = maxTurns;
+
         // Show bids if mode is enabled
         if (showBidsMode) {
           showStatus(`Turn ${turnNumber}/${maxTurns}: ${p1Name} bid $${p1Bid}, ${p2Name} bid $${p2Bid}`);
@@ -570,15 +574,12 @@ function replayNextTurn() {
     const lastTurn = finalTurnHistory[finalTurnHistory.length - 1];
     const winner = lastTurn.newPosition <= 0 ? lastTurn.p1Name : 
                   lastTurn.newPosition >= 10 ? lastTurn.p2Name : 
-                  lastTurn.p1Name;  // Default to p1 if max turns reached
+                  lastTurn.p1Name;
     
-    // Add final game state
-    rm.textContent += "\n=== FINAL RESULT ===\n";
+    rm.textContent += `\n=== FINAL RESULT ===\n\n`;
     rm.textContent += `Bottle final position: ${lastTurn.newPosition}\n`;
-    rm.textContent += `🏆 ${winner} WINS THE GAME! 🏆\n`;
-    
-    // Show final money for both players
-    rm.textContent += `\nFinal Money:\n`;
+    rm.textContent += `🏆 ${winner} WINS THE GAME! 🏆\n\n`;
+    rm.textContent += `Final Money:\n`;
     rm.textContent += `${lastTurn.p1Name}: $${lastTurn.p1MoneyAfter}\n`;
     rm.textContent += `${lastTurn.p2Name}: $${lastTurn.p2MoneyAfter}\n`;
     return;
@@ -586,7 +587,7 @@ function replayNextTurn() {
   
   const turnData = finalTurnHistory[replayIndex];
 
-  rm.textContent += `\n=== Turn ${turnData.turnNumber}/${MAX_TURNS} ===\n`;
+  rm.textContent += `\n=== Turn ${turnData.turnNumber}/${MAX_TURNS} ===\n\n`;
   
   // Show bids and money changes
   rm.textContent += `${turnData.p1Name} bid: $${turnData.p1Bid}\n`;
@@ -595,22 +596,22 @@ function replayNextTurn() {
   // Show who won and money results
   const winnerName = turnData.winner === 1 ? turnData.p1Name : turnData.p2Name;
   if (turnData.tieUsed) {
-    rm.textContent += `Tie! ${winnerName} won due to advantage\n`;
+    rm.textContent += `Tie! ${winnerName} won due to advantage\n\n`;
   } else {
-    rm.textContent += `${winnerName} won the turn\n`;
+    rm.textContent += `${winnerName} won the turn\n\n`;
   }
   
   // Show money changes
-  rm.textContent += `\nMoney changes:\n`;
+  rm.textContent += `Money changes:\n`;
   rm.textContent += `${turnData.p1Name}: $${turnData.p1MoneyBefore} → $${turnData.p1MoneyAfter}\n`;
-  rm.textContent += `${turnData.p2Name}: $${turnData.p2MoneyBefore} → $${turnData.p2MoneyAfter}\n`;
+  rm.textContent += `${turnData.p2Name}: $${turnData.p2MoneyBefore} → $${turnData.p2MoneyAfter}\n\n`;
   
-  rm.textContent += `\nBottle moved: ${turnData.oldPosition} → ${turnData.newPosition}\n`;
-  rm.textContent += "------------------------";
+  rm.textContent += `Bottle moved: ${turnData.oldPosition} → ${turnData.newPosition}\n`;
+  rm.textContent += `------------------------\n`;
 
   replayIndex++;
   animateScotchMove(turnData.oldPosition, turnData.newPosition, () => {
-    setTimeout(replayNextTurn, 1000);  // Increased delay for better readability
+    setTimeout(replayNextTurn, 1000);
   });
   
   // Auto-scroll to bottom
