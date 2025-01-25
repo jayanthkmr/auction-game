@@ -9,6 +9,7 @@ const http = require("http");
 const WebSocket = require("ws");
 const fs = require('fs');
 const { AIPlayer, AI_NAMES } = require('./ai_agents');
+const Player = require('./public/player.js');
 
 //////////////////////////////////
 // Basic Setup
@@ -120,9 +121,9 @@ function broadcastBidStatus() {
   broadcastAll({
     type: "BID_STATUS",
     p1Name: p1.name,
-    p1Submitted: p1.hasSubmitted,
+    p1Submitted: p1.player.gameState.hasSubmitted,
     p2Name: p2.name,
-    p2Submitted: p2.hasSubmitted,
+    p2Submitted: p2.player.gameState.hasSubmitted,
   });
 }
 
@@ -130,7 +131,7 @@ async function handleAIBid(playerName) {
   const player = players[playerName];
   const aiPlayer = aiPlayers[playerName];
   
-  if (!player || !aiPlayer || player.hasSubmitted) return;
+  if (!player || !aiPlayer || player.player.gameState.hasSubmitted) return;
   
   // Get opponent info
   const playerArray = Object.values(players);
@@ -139,7 +140,7 @@ async function handleAIBid(playerName) {
   
   // Prepare game state for AI
   const gameState = {
-    myMoney: player.money,
+    myMoney: player.player.gameState.money,
     bottlePosition: scotchPosition,
     turnNumber,
     maxTurns: MAX_TURNS,
@@ -152,25 +153,25 @@ async function handleAIBid(playerName) {
     console.log(`AI ${playerName} decided to bid: $${bid}`);
     
     // Submit the bid
-    player.lastBid = bid;
-    player.hasSubmitted = true;
+    player.player.gameState.lastBid = bid;
+    player.player.gameState.hasSubmitted = true;
     
     // Broadcast bid status
     broadcastBidStatus();
     
     // Check if both players have submitted
-    if (playerArray.every(p => p.hasSubmitted)) {
+    if (playerArray.every(p => p.player.gameState.hasSubmitted)) {
       resolveTurn();
     }
   } catch (error) {
     console.error(`Error getting AI bid for ${playerName}:`, error);
     // Fallback to a random bid in case of error
-    const fallbackBid = Math.floor(Math.random() * (player.money + 1));
-    player.lastBid = fallbackBid;
-    player.hasSubmitted = true;
+    const fallbackBid = Math.floor(Math.random() * (player.player.gameState.money + 1));
+    player.player.gameState.lastBid = fallbackBid;
+    player.player.gameState.hasSubmitted = true;
     broadcastBidStatus();
     
-    if (playerArray.every(p => p.hasSubmitted)) {
+    if (playerArray.every(p => p.player.gameState.hasSubmitted)) {
       resolveTurn();
     }
   }
@@ -178,25 +179,25 @@ async function handleAIBid(playerName) {
 
 function resolveTurn() {
   const playerArray = Object.values(players);
-  const p1 = playerArray[0];
-  const p2 = playerArray[1];
+  const p1 = playerArray[0].player;
+  const p2 = playerArray[1].player;
 
   // Record old position and money
   const oldPosition = scotchPosition;
-  const p1MoneyBefore = p1.money;
-  const p2MoneyBefore = p2.money;
+  const p1MoneyBefore = p1.gameState.money;
+  const p2MoneyBefore = p2.gameState.money;
   
   // Determine winner
   let winner;
   let tieUsed = false;
   
-  if (p1.lastBid === p2.lastBid) {
+  if (p1.gameState.lastBid === p2.gameState.lastBid) {
     winner = drawAdvantage;
     tieUsed = true;
     // Switch advantage for next tie
     drawAdvantage = drawAdvantage === 1 ? 2 : 1;
   } else {
-    winner = p1.lastBid > p2.lastBid ? 1 : 2;
+    winner = p1.gameState.lastBid > p2.gameState.lastBid ? 1 : 2;
   }
 
   // Move bottle
@@ -205,40 +206,48 @@ function resolveTurn() {
 
   // Only deduct bid from the winning player
   if (winner === 1) {
-    p1.money -= p1.lastBid;
+    p1.deductBidAmount();
   } else {
-    p2.money -= p2.lastBid;
+    p2.deductBidAmount();
   }
 
+  // Update positions
+  p1.updatePosition(scotchPosition);
+  p2.updatePosition(scotchPosition);
+
   // Record turn history
-  turnHistory.push({
+  const turnData = {
     turnNumber,
     p1Name: p1.name,
     p2Name: p2.name,
-    p1Bid: p1.lastBid,
-    p2Bid: p2.lastBid,
+    p1Bid: p1.gameState.lastBid,
+    p2Bid: p2.gameState.lastBid,
     p1MoneyBefore,
     p2MoneyBefore,
-    p1MoneyAfter: p1.money,
-    p2MoneyAfter: p2.money,
+    p1MoneyAfter: p1.gameState.money,
+    p2MoneyAfter: p2.gameState.money,
     winner,
     tieUsed,
     oldPosition,
     newPosition: scotchPosition
-  });
+  };
+
+  turnHistory.push(turnData);
+  p1.recordTurnHistory(turnData);
+  p2.recordTurnHistory(turnData);
 
   // Log the game state for debugging
   console.log("Game state after turn:", {
     turnNumber,
     p1: {
       name: p1.name,
-      money: p1.money,
-      lastBid: p1.lastBid
+      money: p1.gameState.money,
+      lastBid: p1.gameState.lastBid
     },
     p2: {
       name: p2.name,
-      money: p2.money,
-      lastBid: p2.lastBid
+      money: p2.gameState.money,
+      lastBid: p2.gameState.lastBid
     },
     scotchPosition,
     gameOver
@@ -251,8 +260,8 @@ function resolveTurn() {
   playerArray.forEach(player => {
     sendMessage(player.ws, {
       type: "PLAYER_UPDATE",
-      money: player.money,
-      lastBid: player.lastBid,
+      money: player.player.gameState.money,
+      lastBid: player.player.gameState.lastBid,
       isWinner: (player === p1 && winner === 1) || (player === p2 && winner === 2)
     });
   });
@@ -266,24 +275,24 @@ function resolveTurn() {
     turnNumber,
     maxTurns: MAX_TURNS,
     winner,
-    p1Bid: p1.lastBid,
-    p2Bid: p2.lastBid
+    p1Bid: p1.gameState.lastBid,
+    p2Bid: p2.gameState.lastBid
   });
 
   // Update AI history if applicable
   if (p1.isAI) {
     aiPlayers[p1.name].addToHistory({
       turnNumber,
-      myBid: p1.lastBid,
-      opponentBid: p2.lastBid,
+      myBid: p1.gameState.lastBid,
+      opponentBid: p2.gameState.lastBid,
       won: winner === 1
     });
   }
   if (p2.isAI) {
     aiPlayers[p2.name].addToHistory({
       turnNumber,
-      myBid: p2.lastBid,
-      opponentBid: p1.lastBid,
+      myBid: p2.gameState.lastBid,
+      opponentBid: p1.gameState.lastBid,
       won: winner === 2
     });
   }
@@ -293,10 +302,10 @@ function resolveTurn() {
   } else {
     // Prepare for next turn
     turnNumber++;
-    p1.hasSubmitted = false;
-    p2.hasSubmitted = false;
-    p1.lastBid = 0;
-    p2.lastBid = 0;
+    p1.player.gameState.hasSubmitted = false;
+    p2.player.gameState.hasSubmitted = false;
+    p1.player.gameState.lastBid = 0;
+    p2.player.gameState.lastBid = 0;
     
     // Broadcast new bid status
     broadcastBidStatus();
@@ -304,7 +313,7 @@ function resolveTurn() {
     // Trigger AI bids after a short delay
     setTimeout(() => {
       playerArray.forEach(player => {
-        if (player.isAI && !player.hasSubmitted) {
+        if (player.player.isAI && !player.player.gameState.hasSubmitted) {
           handleAIBid(player.name);
         }
       });
@@ -322,8 +331,8 @@ function handleGameOver(p1, p2) {
     finalWinner = p2.name; // Player 2's goal
   } else {
     // Position is 5 (middle) - winner is player with more money
-    finalWinner = p1.money > p2.money ? p1.name : 
-                 p2.money > p1.money ? p2.name :
+    finalWinner = p1.gameState.money > p2.gameState.money ? p1.name : 
+                 p2.gameState.money > p1.gameState.money ? p2.name :
                  drawAdvantage === 1 ? p1.name : p2.name; // Use advantage for complete tie
   }
   const finalLoser = finalWinner === p1.name ? p2.name : p1.name;
@@ -337,8 +346,8 @@ function handleGameOver(p1, p2) {
     finalLoser,
     p1Name: p1.name,
     p2Name: p2.name,
-    p1MoneyAfter: p1.money,
-    p2MoneyAfter: p2.money,
+    p1MoneyAfter: p1.gameState.money,
+    p2MoneyAfter: p2.gameState.money,
     newPosition: scotchPosition
   };
 
@@ -519,58 +528,43 @@ wss.on("connection", (ws) => {
           aiPlayers[playerName].resetHistory();
         }
 
+        // Create new player instance
+        const player = new Player(playerName, isAI, aiType);
+        
         // Register new player or update existing player's connection
         if (!players[playerName]) {
-          // New player registration
           players[playerName] = {
-            passcode: isAI ? 'ai_player' : passcode,
+            player,
             ws,
-            money: START_MONEY,
-            hasSubmitted: false,
-            lastBid: 0,
-            name: playerName,
-            isAI: isAI
+            passcode: isAI ? 'ai_player' : passcode
           };
-          console.log(`New player "${playerName}" joined${isAI ? ' as AI' : ` with passcode "${passcode}"`}. Starting money: ${START_MONEY}`);
+          console.log(`New player "${playerName}" joined${isAI ? ' as AI' : ` with passcode "${passcode}"`}`);
         } else {
-          // Update existing player's connection
           const existingPlayer = players[playerName];
           if (isAI || existingPlayer.passcode === passcode) {
-            // Only update the WebSocket connection and preserve other state
             existingPlayer.ws = ws;
-            console.log(`Player "${playerName}" ${isAI ? '(AI) ' : ''}reconnected. Current money: ${existingPlayer.money}`);
+            console.log(`Player "${playerName}" ${isAI ? '(AI) ' : ''}reconnected`);
           } else {
-            console.log("LOGIN_ERROR: Name used with different passcode.");
             return sendMessage(ws, {
               type: "LOGIN_ERROR",
-              message: "That name is used with a different passcode.",
+              message: "That name is used with a different passcode."
             });
           }
         }
 
-        // Send success with show bids mode and isAI flag
+        // Send success response
         sendMessage(ws, {
           type: "LOGIN_SUCCESS",
           playerName,
-          money: players[playerName].money,
+          money: player.gameState.money,
           showBidsMode,
           isFirstPlayer: Object.keys(players).length === 1,
-          isAI: isAI
+          isAI
         });
         
-        // If two players are connected, broadcast bid status and trigger AI bids
+        // Broadcast bid status if two players are connected
         if (Object.keys(players).length === 2) {
           broadcastBidStatus();
-          
-          // Trigger AI bids after a short delay
-          setTimeout(() => {
-            const playerArray = Object.values(players);
-            playerArray.forEach(player => {
-              if (player.isAI && !player.hasSubmitted) {
-                handleAIBid(player.name);
-              }
-            });
-          }, 1000);
         }
         break;
       }
@@ -594,39 +588,32 @@ wss.on("connection", (ws) => {
       // Submit bid
       case "SUBMIT_BID": {
         const { playerName, bid } = data;
-        if (!players[playerName]) {
-          return;
-        }
+        if (!players[playerName]) return;
 
-        // Validate bid
-        const player = players[playerName];
-        const maxBid = turnNumber === 1 ? START_MONEY : player.money;
-        
-        if (bid < 0 || bid > maxBid) {
-          return sendMessage(player.ws, {
-            type: "BID_ERROR",
-            message: `Invalid bid amount. Maximum bid is $${maxBid}`
+        const playerData = players[playerName];
+        try {
+          playerData.player.submitBid(bid);
+          
+          // Send confirmation to the player
+          sendMessage(playerData.ws, {
+            type: "PLAYER_UPDATE",
+            money: playerData.player.gameState.money,
+            lastBid: playerData.player.gameState.lastBid
           });
-        }
 
-        // Record the bid
-        player.lastBid = bid;
-        player.hasSubmitted = true;
+          // Broadcast bid status
+          broadcastBidStatus();
 
-        // Send confirmation to the player
-        sendMessage(player.ws, {
-          type: "PLAYER_UPDATE",
-          money: player.money,
-          lastBid: bid
-        });
-
-        // Broadcast bid status
-        broadcastBidStatus();
-
-        // Check if both players have submitted
-        const playerArray = Object.values(players);
-        if (playerArray.length === 2 && playerArray.every(p => p.hasSubmitted)) {
-          resolveTurn();
+          // Check if both players have submitted
+          const playerArray = Object.values(players);
+          if (playerArray.length === 2 && playerArray.every(p => p.player.gameState.hasSubmitted)) {
+            resolveTurn();
+          }
+        } catch (error) {
+          sendMessage(playerData.ws, {
+            type: "BID_ERROR",
+            message: error.message
+          });
         }
         break;
       }

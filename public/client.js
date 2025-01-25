@@ -10,8 +10,11 @@
  * 6) If a player disconnects, the game ends for everyone.
  */
 
+// Player class is loaded globally from player.js
+/* global Player */
+
 let ws;
-let myPlayerName = null;
+let myPlayer = null;
 let loggedIn = false;
 let isAudience = false;
 
@@ -23,15 +26,6 @@ let scotchPosition = 5;
 
 // Turn-by-turn final data (for replay)
 let finalTurnHistory = null;
-
-// Add this at the top with other state variables
-let gameState = {
-  turnNumber: 0,
-  maxTurns: 0,
-  isGameOver: false,
-  myMoney: 0,
-  lastBid: null
-};
 
 // Add these as state variables at the top with others
 let p1Name = "P1";
@@ -258,7 +252,7 @@ function connectWebSocket() {
     showStatus("Connected to game server");
     
     // Request leaderboard data on connection
-    ws.send(JSON.stringify({ type: "REQUEST_LEADERBOARD" }));
+    requestLeaderboard();
   };
   
   ws.onmessage = (msgEvent) => {
@@ -297,53 +291,28 @@ function handleServerMessage(data) {
       const isHumanLogin = !data.isAI;
       
       if (isHumanLogin) {
-        myPlayerName = data.playerName;
+        myPlayer = new Player(data.playerName);
+        myPlayer.updateGameState({
+          money: data.money,
+          turnNumber: 1,
+          maxTurns: MAX_TURNS
+        });
+        
         loggedIn = true;
         isAudience = false;
-        gameState = {
-          turnNumber: 1,
-          maxTurns: 5,
-          myMoney: data.money,
-          lastBid: 0,
-          isGameOver: false
-        };
         showBidsMode = data.showBidsMode;
         
-        // Update UI for human player
+        // Update UI
         document.getElementById("loginPanel").style.display = "none";
         document.getElementById("audiencePanel").style.display = "none";
         document.getElementById("gamePanel").style.display = "block";
-        document.getElementById("playerNameSpan").textContent = myPlayerName;
+        document.getElementById("playerNameSpan").textContent = myPlayer.name;
         
-        // Show initial money and turn number
-        const myStatsDiv = document.getElementById("myStats");
-        myStatsDiv.textContent = `Your Money: $${gameState.myMoney} | Last Bid: $0`;
+        updatePlayerStats();
+        updateTurnDisplay();
+        updateBidInput();
         
-        // Update turn display
-        const turnDisplay = document.getElementById("turnDisplay");
-        if (turnDisplay) {
-          turnDisplay.textContent = `Turn ${gameState.turnNumber} of ${gameState.maxTurns}`;
-        }
-
-        // Update bid input max
-        const bidInput = document.getElementById("bidInput");
-        if (bidInput) {
-          bidInput.max = gameState.myMoney;
-          const bidLabel = document.querySelector('label[for="bidInput"]');
-          if (bidLabel) {
-            bidLabel.textContent = `Your Bid (max $${gameState.myMoney}): `;
-          }
-        }
-
-        showStatus(`Logged in with $${gameState.myMoney}`);
-
-        // If there's a pending AI login, send it now
-        if (window.pendingAILogin) {
-          setTimeout(() => {
-            ws.send(JSON.stringify(window.pendingAILogin));
-            window.pendingAILogin = null;
-          }, 500);
-        }
+        showStatus(`Logged in with $${myPlayer.gameState.money}`);
       } else {
         // For AI logins, store the player names
         if (data.playerName === AI_NAMES.CLAUDE) {
@@ -354,7 +323,7 @@ function handleServerMessage(data) {
         // Redraw the canvas to show updated names
         drawBaseline(scotchPosition);
       }
-      console.log("Login success:", { myPlayerName, p1Name, p2Name, gameState });
+      console.log("Login success:", { myPlayerName: myPlayer.name, p1Name, p2Name, gameState: myPlayer.gameState });
       
       // Handle checkbox state
       const showBidsCheck = document.getElementById("showBidsCheck");
@@ -382,9 +351,15 @@ function handleServerMessage(data) {
 
     // A partial game state for new audience
     case "GAME_STATE":
-      gameState.turnNumber = data.turnNumber;
-      gameState.maxTurns = data.maxTurns;
-      gameState.isGameOver = data.gameOver;
+      if (!isAudience) {
+        myPlayer.updateGameState({
+          turnNumber: data.turnNumber,
+          maxTurns: data.maxTurns,
+          isGameOver: data.gameOver,
+          money: data.money,
+          lastBid: data.lastBid
+        });
+      }
       scotchPosition = data.scotchPosition || 5;
       drawBaseline(scotchPosition);
       showStatus(`Turn ${data.turnNumber}/${data.maxTurns}${data.gameOver ? " - Game Over!" : ""}`);
@@ -393,15 +368,21 @@ function handleServerMessage(data) {
     // Turn resolved => animate scotch
     case "TURN_RESOLVED":
       console.log("Turn resolved:", data);
-      gameState.turnNumber = data.turnNumber;
-      gameState.maxTurns = data.maxTurns;
+      if (!isAudience && myPlayer) {
+        myPlayer.updateGameState({
+          turnNumber: data.turnNumber,
+          maxTurns: data.maxTurns,
+          money: data.money,
+          lastBid: data.lastBid
+        });
+      }
       const oldPos = scotchPosition;
       scotchPosition = data.scotchPosition;
       
       // Update turn display
       const turnDisplay = document.getElementById("turnDisplay");
       if (turnDisplay) {
-        turnDisplay.textContent = `Turn ${gameState.turnNumber} of ${gameState.maxTurns}`;
+        turnDisplay.textContent = `Turn ${data.turnNumber} of ${data.maxTurns}`;
       }
 
       // Show turn result in status
@@ -418,8 +399,12 @@ function handleServerMessage(data) {
       }
       
       animateScotchMove(oldPos, scotchPosition, () => {
-        if (data.gameOver) {
-          gameState.isGameOver = true;
+        if (data.gameOver && !isAudience && myPlayer) {
+          myPlayer.updateGameState({
+            isGameOver: true,
+            money: data.money,
+            lastBid: data.lastBid
+          });
         }
       });
       break;
@@ -431,40 +416,13 @@ function handleServerMessage(data) {
 
     // Private update to me about my money + bid
     case "PLAYER_UPDATE":
-      console.log("Player update for", myPlayerName, ":", data);
-      // Only update if this is for the human player
-      if (!isAudience && myPlayerName && !data.isAI) {
-        // Store previous values for logging
-        const prevMoney = gameState.myMoney;
-        const prevBid = gameState.lastBid;
-        
-        // Update game state
-        gameState.myMoney = data.money;
-        gameState.lastBid = data.lastBid;
-        
-        // Update human stats display
-        const myStatsDiv = document.getElementById("myStats");
-        if (myStatsDiv) {
-          myStatsDiv.textContent = `Your Money: $${gameState.myMoney} | Last Bid: $${gameState.lastBid || 0}`;
-        }
-        
-        // Update the bid input max value
-        const bidInput = document.getElementById("bidInput");
-        if (bidInput) {
-          bidInput.max = gameState.myMoney;
-          // Update the label to show current max bid
-          const bidLabel = document.querySelector('label[for="bidInput"]');
-          if (bidLabel) {
-            bidLabel.textContent = `Your Bid (max $${gameState.myMoney}): `;
-          }
-        }
-        
-        console.log("Updated human player stats:", {
-          player: myPlayerName,
-          moneyChange: `${prevMoney} -> ${gameState.myMoney}`,
-          bidChange: `${prevBid} -> ${gameState.lastBid}`,
-          currentState: gameState
+      if (myPlayer && !isAudience) {
+        myPlayer.updateGameState({
+          money: data.money,
+          lastBid: data.lastBid
         });
+        updatePlayerStats();
+        updateBidInput();
       }
       break;
 
@@ -474,17 +432,20 @@ function handleServerMessage(data) {
       const p1Status = data.p1Submitted ? "✓" : "❌";
       const p2Status = data.p2Submitted ? "✓" : "❌";
       
-      // Update player names if not set
-      if (data.p1Name) p1Name = data.p1Name;
-      if (data.p2Name) p2Name = data.p2Name;
+      // Update player names if provided, using defaults if undefined
+      p1Name = data.p1Name || "Player 1";
+      p2Name = data.p2Name || "Player 2";
       
       // Only show status for the current player and their opponent
-      if (myPlayerName === data.p1Name) {
-        showStatus(`${p1Status} You have ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} ${data.p2Name} has ${data.p2Submitted ? "" : "NOT "}submitted`);
-      } else if (myPlayerName === data.p2Name) {
-        showStatus(`${p1Status} ${data.p1Name} has ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} You have ${data.p2Submitted ? "" : "NOT "}submitted`);
-      } else {
-        showStatus(`${p1Status} ${data.p1Name} has ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} ${data.p2Name} has ${data.p2Submitted ? "" : "NOT "}submitted`);
+      if (isAudience) {
+        // Only show turn number if available
+        const turnInfo = data.turnNumber ? ` - Turn ${data.turnNumber}/${MAX_TURNS}` : '';
+        showStatus(`${p1Name} vs ${p2Name}${turnInfo}`);
+        showStatus(`${p1Status} ${p1Name} ${data.p1Submitted ? "has submitted" : "waiting"} | ${p2Status} ${p2Name} ${data.p2Submitted ? "has submitted" : "waiting"}`);
+      } else if (myPlayer && myPlayer.name === p1Name) {
+        showStatus(`${p1Status} You have ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} ${p2Name} has ${data.p2Submitted ? "" : "NOT "}submitted`);
+      } else if (myPlayer && myPlayer.name === p2Name) {
+        showStatus(`${p1Status} ${p1Name} has ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} You have ${data.p2Submitted ? "" : "NOT "}submitted`);
       }
 
       // Redraw canvas to show updated names
@@ -494,7 +455,13 @@ function handleServerMessage(data) {
     // Full game over with replay info
     case "GAME_OVER":
       finalTurnHistory = data.turnHistory;
-      gameState.finalState = data.finalState; // Store final state for replay
+      if (!isAudience && myPlayer) {
+        myPlayer.updateGameState({
+          finalState: data.finalState,
+          isGameOver: true,
+          money: data.finalState[myPlayer.name === data.finalState.p1Name ? 'p1MoneyAfter' : 'p2MoneyAfter']
+        });
+      }
       showStatus("Game Over!");
       document.getElementById("replaySection").style.display = "block";
       
@@ -532,6 +499,31 @@ function handleServerMessage(data) {
     default:
       console.log("Unknown message:", data);
       break;
+  }
+}
+
+function updatePlayerStats() {
+  const myStatsDiv = document.getElementById("myStats");
+  if (myStatsDiv && myPlayer) {
+    myStatsDiv.textContent = `Your Money: $${myPlayer.gameState.money} | Last Bid: $${myPlayer.gameState.lastBid || 0}`;
+  }
+}
+
+function updateTurnDisplay() {
+  const turnDisplay = document.getElementById("turnDisplay");
+  if (turnDisplay && myPlayer) {
+    turnDisplay.textContent = `Turn ${myPlayer.gameState.turnNumber} of ${MAX_TURNS}`;
+  }
+}
+
+function updateBidInput() {
+  const bidInput = document.getElementById("bidInput");
+  if (bidInput && myPlayer) {
+    bidInput.max = myPlayer.gameState.money;
+    const bidLabel = document.querySelector('label[for="bidInput"]');
+    if (bidLabel) {
+      bidLabel.textContent = `Your Bid (max $${myPlayer.gameState.money}): `;
+    }
   }
 }
 
@@ -627,7 +619,7 @@ function setupBidFieldMask() {
 
   // Update the label to show max $100 at start or current money during game
   function updateBidLabel() {
-    const maxBid = gameState.myMoney;
+    const maxBid = myPlayer.gameState.money;
     bidLabel.textContent = `Your Bid (max $${maxBid}): `;
     bidInput.max = maxBid;
   }
@@ -639,11 +631,11 @@ function setupBidFieldMask() {
     const numericVal = newVal.replace(/[^0-9]/g, '');
     
     if (numericVal.length > 0) {
-      const maxBid = gameState.myMoney;
+      const maxBid = myPlayer.gameState.money;
       const validatedBid = Math.min(parseInt(numericVal), maxBid);
       realBidValue = validatedBid.toString();
       e.target.value = validatedBid.toString();
-      console.log("Bid input:", { value: validatedBid, maxBid, money: gameState.myMoney });
+      console.log("Bid input:", { value: validatedBid, maxBid, money: myPlayer.gameState.money });
     } else {
       realBidValue = "";
       e.target.value = "";
@@ -661,37 +653,27 @@ function setupBidFieldMask() {
 }
 
 function submitBid() {
-  if (!loggedIn || isAudience) return;
+  if (!loggedIn || isAudience || !myPlayer) return;
   
   const bidInt = parseInt(realBidValue || "0", 10);
-  const maxBid = gameState.myMoney;
   
-  console.log("Human player submitting bid:", { 
-    player: myPlayerName,
-    bid: bidInt, 
-    maxBid, 
-    currentMoney: gameState.myMoney 
-  });
-  
-  // Validate bid against current money
-  if (bidInt > maxBid) {
-    showStatus(`Error: Bid ($${bidInt}) exceeds maximum allowed bid ($${maxBid})`);
-    return;
+  try {
+    myPlayer.submitBid(bidInt);
+    
+    ws.send(
+      JSON.stringify({
+        type: "SUBMIT_BID",
+        playerName: myPlayer.name,
+        bid: bidInt
+      })
+    );
+    
+    showStatus(`Bid submitted: $${bidInt}`);
+    realBidValue = "";
+    document.getElementById("bidInput").value = "";
+  } catch (error) {
+    showStatus(`Error: ${error.message}`);
   }
-  
-  // Only show submission message, not result
-  showStatus(`Bid submitted: $${bidInt}`);
-  
-  ws.send(
-    JSON.stringify({
-      type: "SUBMIT_BID",
-      playerName: myPlayerName,
-      bid: bidInt,
-      isHuman: true
-    })
-  );
-  realBidValue = "";
-  document.getElementById("bidInput").value = "";
 }
 
 //////////////////////////////////////////////////
@@ -728,7 +710,7 @@ function replayNextTurn() {
   const rm = document.getElementById("replayMessages");
   if (replayIndex >= finalTurnHistory.length) {
     // Get final state from game over data
-    const finalState = gameState.finalState;
+    const finalState = myPlayer.gameState.finalState;
     if (!finalState) {
       console.error("Missing final state in game over data");
       return;
@@ -873,7 +855,7 @@ function updateLeaderboardDisplay(leaderboard) {
     // Add player name
     const nameCell = document.createElement("td");
     nameCell.textContent = player.name;
-    if (player.name === myPlayerName) {
+    if (!isAudience && myPlayer && player.name === myPlayer.name) {
       nameCell.style.fontWeight = "bold";
       nameCell.style.color = "#ffcc00";
     }
@@ -921,4 +903,11 @@ function updateLeaderboardDisplay(leaderboard) {
     
     tbody.appendChild(row);
   });
+}
+
+// Add this function to request leaderboard data
+function requestLeaderboard() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "REQUEST_LEADERBOARD" }));
+  }
 }

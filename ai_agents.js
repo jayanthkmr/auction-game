@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 const Anthropic = require('@anthropic-ai/sdk');
+const Player = require('./public/player.js');
 require('dotenv').config();
 
 const openai = new OpenAI({
@@ -10,15 +11,16 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY
 });
 
-class AIPlayer {
+class AIPlayer extends Player {
   constructor(name, type) {
-    this.name = name;
+    super(name, true, type);
     this.type = type; // 'openai' or 'claude'
-    this.gameHistory = [];
+    this.aiHistory = []; // Separate AI-specific history
   }
 
   async decideBid(gameState) {
-    const { myMoney, bottlePosition, turnNumber, maxTurns, opponentName } = gameState;
+    const { bottlePosition, turnNumber, maxTurns, opponentName } = gameState;
+    const myMoney = this.gameState.money;
     
     // Prepare context for the AI
     const context = `
@@ -33,7 +35,7 @@ class AIPlayer {
       - Winner pays their bid, loser keeps their money
       - You win by getting bottle to your end (0 or 10) or most progress in ${maxTurns} turns
       
-      Previous turns: ${this.formatHistory()}
+      Previous turns: ${this.formatAIHistory()}
       
       Decide a bid amount (max: $${myMoney}). Consider:
       1. Bottle position and distance to goal
@@ -45,6 +47,7 @@ class AIPlayer {
     `;
 
     try {
+      let bid;
       if (this.type === 'openai') {
         const response = await openai.chat.completions.create({
           model: "gpt-4",
@@ -52,8 +55,7 @@ class AIPlayer {
           temperature: 0.7,
           max_tokens: 10
         });
-        const bid = parseInt(response.choices[0].message.content.trim());
-        return this.validateBid(bid, myMoney);
+        bid = parseInt(response.choices[0].message.content.trim());
       } else {
         const response = await anthropic.messages.create({
           model: "claude-3-sonnet-20240229",
@@ -61,36 +63,47 @@ class AIPlayer {
           temperature: 0.7,
           messages: [{ role: "user", content: context }]
         });
-        const bid = parseInt(response.content[0].text.trim());
-        return this.validateBid(bid, myMoney);
+        bid = parseInt(response.content[0].text.trim());
+      }
+
+      // Use the Player class's submitBid method for validation
+      try {
+        this.submitBid(bid);
+        return bid;
+      } catch (error) {
+        console.log(`Invalid bid from AI (${bid}), using fallback`);
+        const fallbackBid = Math.floor(Math.random() * (myMoney + 1));
+        this.submitBid(fallbackBid);
+        return fallbackBid;
       }
     } catch (error) {
       console.error(`AI Bid Error (${this.type}):`, error);
       // Fallback to a simple strategy if AI fails
-      return Math.floor(Math.random() * (myMoney + 1));
+      const fallbackBid = Math.floor(Math.random() * (myMoney + 1));
+      this.submitBid(fallbackBid);
+      return fallbackBid;
     }
   }
 
-  validateBid(bid, maxMoney) {
-    if (isNaN(bid) || bid < 0) return 0;
-    if (bid > maxMoney) return maxMoney;
-    return Math.floor(bid);
-  }
-
-  formatHistory() {
-    if (this.gameHistory.length === 0) return "No previous turns";
-    return this.gameHistory.map(turn => 
+  // AI-specific history management
+  formatAIHistory() {
+    if (this.aiHistory.length === 0) return "No previous turns";
+    return this.aiHistory.map(turn => 
       `Turn ${turn.turnNumber}: You bid $${turn.myBid}, opponent bid $${turn.opponentBid}, ` +
       `${turn.won ? 'you won' : 'opponent won'}`
     ).join('\n');
   }
 
   addToHistory(turnData) {
-    this.gameHistory.push(turnData);
+    // Add to both Player history and AI-specific history
+    super.recordTurnHistory(turnData);
+    this.aiHistory.push(turnData);
   }
 
   resetHistory() {
-    this.gameHistory = [];
+    // Reset both Player history and AI-specific history
+    super.reset();
+    this.aiHistory = [];
   }
 }
 
@@ -98,6 +111,6 @@ module.exports = {
   AIPlayer,
   AI_NAMES: {
     CLAUDE: "Claude-AI",
-    OPENAI: "GPT4-AI"
+    GPT4: "GPT4-AI"
   }
 }; 
