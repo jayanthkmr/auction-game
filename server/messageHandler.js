@@ -49,29 +49,40 @@ class MessageHandler {
   }
 
   handleLogin(ws, data) {
-    const { playerName, passcode, showBids, isAI, aiType, isFirstPlayer } = data;
-    
-    // Validate input
-    if (!playerName || playerName.length > 20) {
-      throw new Error('Invalid name');
-    }
+    try {
+      const { playerName, passcode, showBids, isAI, aiType, isFirstPlayer } = data;
+      
+      // Validate input
+      if (!playerName || playerName.length > 20) {
+        throw new Error('Invalid name');
+      }
 
-    // Create player and start/join game
-    const game = this.gameManager.handlePlayerJoin(ws, playerName, isAI, aiType, showBids, isFirstPlayer);
-    
-    // Send login success response
-    ws.send(JSON.stringify({
-      type: 'LOGIN_SUCCESS',
-      playerName: playerName,
-      money: 100,
-      showBidsMode: showBids,
-      isFirstPlayer: isFirstPlayer,
-      isAI: isAI
-    }));
+      // Create player and start/join game
+      const game = this.gameManager.handlePlayerJoin(ws, playerName, isAI, aiType, showBids, isFirstPlayer);
+      
+      // Send login success response
+      ws.send(JSON.stringify({
+        type: 'LOGIN_SUCCESS',
+        playerName: playerName,
+        money: 100,
+        showBidsMode: showBids,
+        isFirstPlayer: game.players[0].name === playerName,
+        isAI: isAI
+      }));
 
-    // If this completes a game, broadcast state
-    if (game) {
-      this.gameManager.broadcastGameState(game);
+      // If game is ready to start, broadcast state
+      if (game.status === 'active') {
+        this.gameManager.broadcastGameState(game);
+        
+        // Broadcast initial bid status
+        this.gameManager.broadcastBidStatus(game);
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      ws.send(JSON.stringify({
+        type: 'LOGIN_ERROR',
+        message: error.message
+      }));
     }
   }
 
@@ -84,37 +95,73 @@ class MessageHandler {
   }
 
   handleStartGame(ws, data) {
-    const { playerName } = data;
-    const game = this.gameManager.getGameByPlayer(playerName);
-    
-    if (!game) {
-      throw new Error('Game not found');
-    }
+    try {
+      const { playerName } = data;
+      const game = this.gameManager.getGameByPlayer(playerName);
+      
+      if (!game) {
+        throw new Error('Game not found');
+      }
 
-    // Start the game
-    game.status = 'active';
-    this.gameManager.broadcastGameState(game);
+      if (game.players.length !== 2) {
+        throw new Error('Waiting for second player');
+      }
 
-    // For AI vs AI games, trigger initial bids
-    if (game.players.some(p => p.isAI)) {
-      game.players.forEach(player => {
-        if (player.isAI) {
-          handleAIBid(game, player);
-        }
-      });
+      if (game.status === 'active') {
+        throw new Error('Game already started');
+      }
+
+      // Start the game
+      game.status = 'active';
+      this.gameManager.broadcastGameState(game);
+      this.gameManager.broadcastBidStatus(game);
+    } catch (error) {
+      console.error('Start game error:', error);
+      ws.send(JSON.stringify({
+        type: 'ERROR',
+        message: error.message
+      }));
     }
   }
 
   handleBid(ws, data) {
-    const { playerName, bid } = data;
-    
-    if (typeof bid !== 'number' || bid < 0) {
-      throw new Error('Invalid bid amount');
-    }
+    try {
+      const { playerName, bid } = data;
+      
+      if (typeof bid !== 'number' || bid < 0) {
+        throw new Error('Invalid bid amount');
+      }
 
-    const success = this.gameManager.placeBid(ws, bid);
-    if (!success) {
-      throw new Error('Failed to place bid');
+      // Get the game for this player
+      const game = this.gameManager.getGameByPlayer(playerName);
+      if (!game) {
+        throw new Error('Game not found');
+      }
+
+      // Verify game is active
+      if (game.status !== 'active') {
+        throw new Error('Game has not started yet');
+      }
+
+      // Find the player in the game
+      const player = game.players.find(p => p.name === playerName);
+      if (!player) {
+        throw new Error('Player not found in game');
+      }
+
+      // Verify this is the player's websocket
+      if (player.ws !== ws) {
+        throw new Error('Invalid player connection');
+      }
+
+      // Place the bid
+      this.gameManager.placeBid(game, player, bid);
+    } catch (error) {
+      console.error('Error handling bid:', error);
+      ws.send(JSON.stringify({
+        type: 'BID_ERROR',
+        message: error.message
+      }));
     }
   }
 

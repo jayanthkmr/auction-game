@@ -7,30 +7,48 @@ class LeaderboardManager {
     if (!this.players.has(player.name)) {
       this.players.set(player.name, player);
     }
+    return this.players.get(player.name);
+  }
+
+  getPlayer(name) {
+    return this.players.get(name);
   }
 
   updateRatings(winner, loser) {
-    const K = 32; // K-factor for ELO calculation
-    const expectedScore = 1 / (1 + Math.pow(10, (loser.rating - winner.rating) / 400));
-    const ratingChange = Math.round(K * (1 - expectedScore));
+    const K = 32; // Rating adjustment factor
+    const expectedWinProbability = 1 / (1 + Math.pow(10, (loser.rating - winner.rating) / 400));
+    const ratingChange = Math.round(K * (1 - expectedWinProbability));
 
-    winner.updateRating(winner.rating + ratingChange);
-    loser.updateRating(loser.rating - ratingChange);
+    const oldWinnerRating = winner.rating;
+    const oldLoserRating = loser.rating;
 
-    return ratingChange;
+    winner.rating += ratingChange;
+    loser.rating = Math.max(0, loser.rating - ratingChange);
+
+    return {
+      winner: {
+        name: winner.name,
+        ratingChange: ratingChange,
+        newRating: winner.rating,
+        oldRating: oldWinnerRating
+      },
+      loser: {
+        name: loser.name,
+        ratingChange: -ratingChange,
+        newRating: loser.rating,
+        oldRating: oldLoserRating
+      }
+    };
   }
 
   getLeaderboard() {
-    return Array.from(this.players.values())
-      .map(player => ({
-        name: player.name,
-        rating: player.rating,
-        wins: player.wins,
-        losses: player.losses,
-        gamesPlayed: player.gamesPlayed,
-        winRate: player.gamesPlayed > 0 ? (player.wins / player.gamesPlayed) : 0
-      }))
-      .sort((a, b) => b.rating - a.rating);
+    const players = Array.from(this.players.values())
+      .filter(p => p.gamesPlayed > 0)
+      .map(p => p.toJSON())
+      .sort((a, b) => b.rating - a.rating)
+      .slice(0, 10);
+
+    return players;
   }
 }
 

@@ -15,7 +15,7 @@
 
 // Initialize WebSocket and player state
 let ws;
-let myPlayer = null;
+let myPlayerName = null;
 let loggedIn = false;
 let isAudience = false;
 
@@ -189,6 +189,7 @@ function drawScotch(pos) {
 
 // Animate scotch movement
 function animateScotchMove(oldPos, newPos, onComplete) {
+  console.log("Starting animation:", oldPos, "->", newPos);
   if (oldPos === newPos) {
     if (onComplete) onComplete();
     return;
@@ -229,22 +230,35 @@ function animateScotchMove(oldPos, newPos, onComplete) {
 // On page load
 //////////////////////////////////////////////////
 window.addEventListener("load", () => {
+  // Set canvas dimensions
+  canvas.width = 600;
+  canvas.height = 200;
+  
   // In case scotchImg wasn't loaded, we'll still attempt the baseline
   drawBaseline(scotchPosition);
-  connectWebSocket();
+  
+  // Initialize bid field mask
   updateBidLabel = setupBidFieldMask();
   
-  // Request initial leaderboard data
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: "REQUEST_LEADERBOARD" }));
-  } else {
-    // If websocket isn't ready, wait and try again
-    setTimeout(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "REQUEST_LEADERBOARD" }));
-      }
-    }, 1000);
+  // Connect to WebSocket and set up initial state
+  connectWebSocket();
+  
+  // Initialize leaderboard table
+  const leaderboardTable = document.getElementById("leaderboardTable");
+  if (leaderboardTable) {
+    const tbody = leaderboardTable.querySelector("tbody");
+    if (!tbody) {
+      const newTbody = document.createElement("tbody");
+      leaderboardTable.appendChild(newTbody);
+    }
   }
+  
+  // Request initial leaderboard data after a short delay to ensure WebSocket is connected
+  setTimeout(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      requestLeaderboard();
+    }
+  }, 1000);
 });
 
 // Connect to WebSocket server
@@ -323,7 +337,7 @@ function handleServerMessage(data) {
       break;
 
     case 'LEADERBOARD_UPDATE':
-      updateLeaderboard(data.leaderboard);
+      updateLeaderboardDisplay(data.leaderboard);
       break;
 
     default:
@@ -336,28 +350,43 @@ function handleLoginSuccess(data) {
   const isHumanLogin = !data.isAI;
   
   if (isHumanLogin) {
-    myPlayer = new Player(data.playerName);
-    myPlayer.updateGameState({
-      money: data.money,
+    myPlayerName = data.playerName;
+    gameState = {
+      myMoney: 100, // Initialize with starting money
       turnNumber: 1,
-      maxTurns: MAX_TURNS
-    });
+      maxTurns: MAX_TURNS,
+      lastBid: 0,  // Initialize to 0 instead of null
+      isGameOver: false
+    };
     
     loggedIn = true;
     isAudience = false;
     showBidsMode = data.showBidsMode;
     
-    // Update UI
-    document.getElementById("loginPanel").style.display = "none";
-    document.getElementById("audiencePanel").style.display = "none";
-    document.getElementById("gamePanel").style.display = "block";
-    document.getElementById("playerNameSpan").textContent = myPlayer.name;
+    // Update UI with null checks
+    const loginPanel = document.getElementById("loginPanel");
+    const gamePanel = document.getElementById("gamePanel");
+    const playerNameSpan = document.getElementById("playerNameSpan");
     
+    if (loginPanel) loginPanel.style.display = "none";
+    if (gamePanel) gamePanel.style.display = "block";
+    if (playerNameSpan) playerNameSpan.textContent = myPlayerName;
+    
+    // Update UI elements
     updatePlayerStats();
-    updateTurnDisplay();
     updateBidInput();
     
-    showStatus(`Logged in with $${myPlayer.gameState.money}`);
+    showStatus(`Logged in with $${gameState.myMoney}`);
+    
+    // Initialize canvas
+    if (canvas) {
+      canvas.width = 600;
+      canvas.height = 200;
+      drawBaseline(scotchPosition);
+    }
+    
+    // Request initial leaderboard data
+    requestLeaderboard();
 
     // If there's a pending AI login (Human vs AI mode), send it now
     if (window.pendingAILogin) {
@@ -376,39 +405,52 @@ function handleLoginSuccess(data) {
     drawBaseline(scotchPosition);
   }
   
-  // Handle checkbox state
+  // Handle checkbox state with null check
   const showBidsCheck = document.getElementById("showBidsCheck");
-  if (!data.isFirstPlayer) {
+  if (showBidsCheck && !data.isFirstPlayer) {
     showBidsCheck.disabled = true;
     showBidsCheck.checked = showBidsMode;
-    showBidsCheck.parentElement.style.opacity = "0.5";
-    showBidsCheck.parentElement.title = "Only first player can set this option";
+    if (showBidsCheck.parentElement) {
+      showBidsCheck.parentElement.style.opacity = "0.5";
+      showBidsCheck.parentElement.title = "Only first player can set this option";
+    }
   }
 }
 
 function handleAudienceJoin() {
   loggedIn = true;
   isAudience = true;
-  myPlayer = null; // Explicitly set myPlayer to null for audience members
-  document.getElementById("loginPanel").style.display = "none";
-  document.getElementById("audiencePanel").style.display = "none";
-  document.getElementById("gamePanel").style.display = "block";
-  document.getElementById("playerNameSpan").textContent = "(Audience)";
-  // Hide the bid input UI
-  document.getElementById("bidInput").disabled = true;
-  document.querySelector("#bidInput + button").disabled = true;
+  myPlayerName = null;
+  gameState = {
+    turnNumber: 0,
+    maxTurns: MAX_TURNS,
+    myMoney: 0,
+    lastBid: null,
+    isGameOver: false
+  };
+  
+  const loginPanel = document.getElementById("loginPanel");
+  const gamePanel = document.getElementById("gamePanel");
+  const playerNameSpan = document.getElementById("playerNameSpan");
+  const bidInput = document.getElementById("bidInput");
+  const bidButton = document.querySelector("#bidInput + button");
+  
+  if (loginPanel) loginPanel.style.display = "none";
+  if (gamePanel) gamePanel.style.display = "block";
+  if (playerNameSpan) playerNameSpan.textContent = "(Audience)";
+  if (bidInput) bidInput.disabled = true;
+  if (bidButton) bidButton.disabled = true;
+  
   showStatus("You are an Audience member. You can watch but not bid.");
 }
 
 function handleGameState(data) {
-  if (!isAudience && myPlayer) {
-    myPlayer.updateGameState({
-      turnNumber: data.turnNumber,
-      maxTurns: data.maxTurns,
-      isGameOver: data.gameOver,
-      money: data.money,
-      lastBid: data.lastBid
-    });
+  if (!isAudience) {
+    gameState.turnNumber = data.turnNumber;
+    gameState.maxTurns = data.maxTurns;
+    gameState.isGameOver = data.gameOver;
+    gameState.myMoney = data.money;
+    gameState.lastBid = data.lastBid;
   }
   scotchPosition = data.scotchPosition || 5;
   drawBaseline(scotchPosition);
@@ -417,16 +459,22 @@ function handleGameState(data) {
 
 function handleTurnResolution(data) {
   console.log("Turn resolved:", data);
-  if (!isAudience && myPlayer) {
-    myPlayer.updateGameState({
-      turnNumber: data.turnNumber,
-      maxTurns: data.maxTurns,
-      money: data.money,
-      lastBid: data.lastBid
-    });
+  
+  // Update game state
+  if (!isAudience) {
+    gameState.turnNumber = data.turnNumber;
+    gameState.maxTurns = data.maxTurns;
+    gameState.myMoney = data.money;
+    gameState.lastBid = data.lastBid || 0;
+    
+    // Update UI elements
+    updatePlayerStats();
+    updateBidInput();
   }
-  const oldPos = scotchPosition;
-  scotchPosition = data.scotchPosition;
+
+  // Get positions for animation
+  const oldPos = data.oldPosition;
+  const newPos = data.newPosition;
   
   // Update turn display
   const turnDisplay = document.getElementById("turnDisplay");
@@ -447,23 +495,24 @@ function handleTurnResolution(data) {
     showStatus(`${p1Name} bid: $${data.p1Bid}, ${p2Name} bid: $${data.p2Bid}`);
   }
   
-  animateScotchMove(oldPos, scotchPosition, () => {
-    if (data.gameOver && !isAudience && myPlayer) {
-      myPlayer.updateGameState({
-        isGameOver: true,
-        money: data.money,
-        lastBid: data.lastBid
-      });
+  // Animate the scotch movement
+  console.log("Animating from", oldPos, "to", newPos);
+  animateScotchMove(oldPos, newPos, () => {
+    scotchPosition = newPos;
+    if (data.gameOver && !isAudience) {
+      gameState.isGameOver = true;
+      gameState.myMoney = data.money;
+      gameState.lastBid = data.lastBid || 0;
+      updatePlayerStats();
+      updateBidInput();
     }
   });
 }
 
 function handlePlayerUpdate(data) {
-  if (myPlayer && !isAudience) {
-    myPlayer.updateGameState({
-      money: data.money,
-      lastBid: data.lastBid
-    });
+  if (myPlayerName && !isAudience) {
+    gameState.myMoney = data.money;
+    gameState.lastBid = data.lastBid;
     updatePlayerStats();
     updateBidInput();
   }
@@ -484,9 +533,9 @@ function handleBidStatus(data) {
     const turnInfo = data.turnNumber ? ` - Turn ${data.turnNumber}/${MAX_TURNS}` : '';
     showStatus(`${p1Name} vs ${p2Name}${turnInfo}`);
     showStatus(`${p1Status} ${p1Name} ${data.p1Submitted ? "has submitted" : "waiting"} | ${p2Status} ${p2Name} ${data.p2Submitted ? "has submitted" : "waiting"}`);
-  } else if (myPlayer && myPlayer.name === p1Name) {
+  } else if (myPlayerName && myPlayerName === p1Name) {
     showStatus(`${p1Status} You have ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} ${p2Name} has ${data.p2Submitted ? "" : "NOT "}submitted`);
-  } else if (myPlayer && myPlayer.name === p2Name) {
+  } else if (myPlayerName && myPlayerName === p2Name) {
     showStatus(`${p1Status} ${p1Name} has ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} You have ${data.p2Submitted ? "" : "NOT "}submitted`);
   }
 
@@ -496,12 +545,9 @@ function handleBidStatus(data) {
 
 function handleGameOver(data) {
   finalTurnHistory = data.turnHistory;
-  if (!isAudience && myPlayer) {
-    myPlayer.updateGameState({
-      finalState: data.finalState,
-      isGameOver: true,
-      money: data.finalState[myPlayer.name === data.finalState.p1Name ? 'p1MoneyAfter' : 'p2MoneyAfter']
-    });
+  if (!isAudience) {
+    gameState.finalState = data.finalState;
+    gameState.myMoney = data.finalState[myPlayerName === data.finalState.p1Name ? 'p1MoneyAfter' : 'p2MoneyAfter'];
   }
   showStatus("Game Over!");
   document.getElementById("replaySection").style.display = "block";
@@ -535,7 +581,7 @@ function handleGameOver(data) {
 function loginAsPlayer() {
     const nameInput = document.getElementById("nameInput");
     const passInput = document.getElementById("passInput");
-    const showBidsCheck = document.getElementById("showBidsCheck");
+  const showBidsCheck = document.getElementById("showBidsCheck");
     const gameModeRadios = document.getElementsByName("gameMode");
     let selectedMode = 'human';
     
@@ -545,17 +591,17 @@ function loginAsPlayer() {
             break;
         }
     }
-    
+  
     if (!nameInput.value) {
         showError('Please enter your name');
-        return;
-    }
-    
+    return;
+  }
+  
     if (selectedMode === 'ai_vs_ai') {
         handleAIvsAILogin();
-        return;
-    }
-    
+    return;
+  }
+  
     const isAI = false;
     const aiType = null;
     const isFirstPlayer = !window.waitingPlayer;
@@ -635,12 +681,12 @@ function setupBidFieldMask() {
 
   // Update the label to show max $100 at start or current money during game
   function updateBidLabel() {
-    if (!myPlayer || !myPlayer.gameState) {
+    if (!myPlayerName || !gameState) {
       bidLabel.textContent = `Your Bid (max $100): `;
       bidInput.max = 100;
       return;
     }
-    const maxBid = myPlayer.gameState.money;
+    const maxBid = gameState.myMoney;
     bidLabel.textContent = `Your Bid (max $${maxBid}): `;
     bidInput.max = maxBid;
   }
@@ -654,11 +700,11 @@ function setupBidFieldMask() {
     const numericVal = newVal.replace(/[^0-9]/g, '');
     
     if (numericVal.length > 0) {
-      const maxBid = myPlayer?.gameState?.money || 100;
+      const maxBid = gameState?.myMoney || 100;
       const validatedBid = Math.min(parseInt(numericVal), maxBid);
       realBidValue = validatedBid.toString();
       e.target.value = validatedBid.toString();
-      console.log("Bid input:", { value: validatedBid, maxBid, money: myPlayer?.gameState?.money });
+      console.log("Bid input:", { value: validatedBid, maxBid, money: gameState?.myMoney });
     } else {
       realBidValue = "";
       e.target.value = "";
@@ -677,23 +723,41 @@ function setupBidFieldMask() {
 
 // Submit bid to server
 function submitBid() {
-    const bidInput = document.getElementById("bidInput");
-    const bid = parseInt(bidInput.value);
-    
-    if (isNaN(bid) || bid < 0 || bid > gameState.myMoney) {
-        showError(`Please enter a valid bid between 0 and ${gameState.myMoney}`);
-        return;
-    }
-    
-    ws.send(JSON.stringify({
-        type: 'SUBMIT_BID',
-        playerName: gameState.playerName,
-        bid: bid
-    }));
-    
-    bidInput.value = '';
+  if (!loggedIn || isAudience || !myPlayerName) {
+    showError("You must be logged in to submit a bid");
+    return;
+  }
+  
+  const bidInt = parseInt(realBidValue || "0", 10);
+  
+  // Validate bid against current money
+  if (bidInt > gameState.myMoney) {
+    showError(`Bid ($${bidInt}) exceeds your money ($${gameState.myMoney})`);
+    return;
+  }
+  
+  // Only show submission message, not result
+  showStatus(`Bid submitted: $${bidInt}`);
+  
+  ws.send(JSON.stringify({
+      type: "SUBMIT_BID",
+      playerName: myPlayerName,
+    bid: bidInt
+  }));
+  
+  // Clear the input
+  realBidValue = "";
+  const bidInput = document.getElementById("bidInput");
+  if (bidInput) {
+    bidInput.value = "";
     bidInput.disabled = true;
-    document.querySelector('button[onclick="submitBid()"]').disabled = true;
+  }
+  
+  // Disable submit button
+  const submitButton = document.querySelector("#bidInput + button");
+  if (submitButton) {
+    submitButton.disabled = true;
+  }
 }
 
 //////////////////////////////////////////////////
@@ -733,7 +797,7 @@ function replayNextTurn() {
   const rm = document.getElementById("replayMessages");
   if (replayIndex >= finalTurnHistory.length) {
     // Get final state from game over data
-    const finalState = myPlayer.gameState.finalState;
+    const finalState = gameState.finalState;
     if (!finalState) {
       console.error("Missing final state in game over data");
       return;
@@ -878,7 +942,7 @@ function updateLeaderboardDisplay(leaderboard) {
     // Add player name
     const nameCell = document.createElement("td");
     nameCell.textContent = player.name;
-    if (!isAudience && myPlayer && player.name === myPlayer.name) {
+    if (!isAudience && myPlayerName && player.name === myPlayerName) {
       nameCell.style.fontWeight = "bold";
       nameCell.style.color = "#ffcc00";
     }
@@ -933,4 +997,67 @@ function requestLeaderboard() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "REQUEST_LEADERBOARD" }));
   }
+}
+
+function updatePlayerStats() {
+  const myStats = document.getElementById("myStats");
+  if (!myStats || !myPlayerName || !gameState) return;
+
+  let statsText = `Your Money: $${gameState.myMoney}`;
+  if (gameState.lastBid !== null && gameState.lastBid !== undefined) {
+    statsText += ` | Last Bid: $${gameState.lastBid}`;
+  } else {
+    statsText += ` | Last Bid: $0`;
+  }
+  myStats.textContent = statsText;
+}
+
+function updateTurnDisplay() {
+  const turnDisplay = document.getElementById("turnDisplay");
+  if (!turnDisplay || !myPlayerName || !gameState) return;
+  
+  turnDisplay.textContent = `Turn ${gameState.turnNumber} of ${gameState.maxTurns}`;
+}
+
+function updateBidInput() {
+  const bidInput = document.getElementById("bidInput");
+  const submitButton = document.querySelector("#bidInput + button");
+  const bidLabel = document.querySelector('label[for="bidInput"]');
+  if (!bidInput || !submitButton) return;
+
+  if (!myPlayerName || !gameState || gameState.isGameOver) {
+    bidInput.disabled = true;
+    submitButton.disabled = true;
+    if (bidLabel) {
+      bidLabel.textContent = `Your Bid (max $0):`;
+    }
+    return;
+  }
+
+  // Ensure we have a valid money value
+  const currentMoney = typeof gameState.myMoney === 'number' ? gameState.myMoney : 100;
+  const maxBid = Math.max(0, currentMoney);
+  
+  bidInput.disabled = false;
+  submitButton.disabled = false;
+  bidInput.max = maxBid;
+  if (bidLabel) {
+    bidLabel.textContent = `Your Bid (max $${maxBid}):`;
+  }
+  
+  // Reset the input value
+  bidInput.value = "";
+  realBidValue = "";
+  
+  // Update player stats to ensure money display is in sync
+  updatePlayerStats();
+}
+
+function showError(msg) {
+  const errorDiv = document.getElementById("loginError");
+  if (errorDiv) {
+    errorDiv.textContent = msg;
+    errorDiv.style.color = "#ff3333";
+  }
+  showStatus(`Error: ${msg}`);
 }

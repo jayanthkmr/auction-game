@@ -1,87 +1,52 @@
 class Player {
-  constructor(name, isAI = false, aiType = null, ws = null, showBids = false, isFirstPlayer = false) {
+  constructor(name, ws, isAI = false, aiType = null) {
     this.name = name;
+    this.ws = ws;
+    this.money = 100;
+    this.lastBid = null;
     this.isAI = isAI;
     this.aiType = aiType;
-    this.ws = ws;
-    this.showBids = showBids;
-    this.isFirstPlayer = isFirstPlayer;
-    this.money = 100;
-    this.currentBid = null;
-    this.lastBid = null;
-    this.bidSubmitted = false;
-    this.rating = 1500;
+    this.rating = 1500; // Initial ELO rating
+    this.gamesPlayed = 0;
     this.wins = 0;
     this.losses = 0;
-    this.gamesPlayed = 0;
-    this.bidHistory = [];
-  }
-
-  reset() {
-    this.money = 100;
-    this.currentBid = null;
-    this.lastBid = null;
-    this.bidSubmitted = false;
-    this.bidHistory = [];
   }
 
   submitBid(amount) {
-    if (amount > this.money) {
-      throw new Error('Insufficient funds');
+    if (amount < 0 || amount > this.money) {
+      throw new Error(`Invalid bid amount. Must be between 0 and ${this.money}`);
     }
-    this.currentBid = amount;
-    this.bidSubmitted = true;
+    this.lastBid = amount;
+    this.money -= amount;
+    return true;
   }
 
-  updateMoney(change) {
-    this.money += change;
-    if (this.money < 0) this.money = 0;
+  refundBid() {
+    if (this.lastBid !== null) {
+      this.money += this.lastBid;
+      this.lastBid = null;
+    }
   }
 
-  updateRating(change) {
-    const oldRating = this.rating;
-    this.rating += change;
-    if (this.rating < 0) this.rating = 0;
-    return this.rating - oldRating;
-  }
-
-  recordGameResult(won) {
+  updateStats(won) {
+    this.gamesPlayed++;
     if (won) {
       this.wins++;
     } else {
       this.losses++;
     }
-    this.gamesPlayed++;
-  }
-
-  getStats() {
-    return {
-      name: this.name,
-      rating: this.rating,
-      wins: this.wins,
-      losses: this.losses,
-      gamesPlayed: this.gamesPlayed,
-      winRate: this.gamesPlayed > 0 ? (this.wins / this.gamesPlayed) : 0
-    };
   }
 
   toJSON() {
     return {
       name: this.name,
-      isAI: this.isAI,
-      aiType: this.aiType,
-      showBids: this.showBids,
-      isFirstPlayer: this.isFirstPlayer,
-      money: this.money,
-      rating: this.rating,
-      bidSubmitted: this.bidSubmitted,
+      rating: Math.round(this.rating),
+      gamesPlayed: this.gamesPlayed,
       wins: this.wins,
       losses: this.losses,
-      gamesPlayed: this.gamesPlayed,
-      lastBid: this.lastBid,
-      bidHistory: this.bidHistory
+      winRate: this.gamesPlayed > 0 ? Math.round((this.wins / this.gamesPlayed) * 100) : 0
     };
   }
 }
 
-module.exports = Player; 
+module.exports = { Player }; 

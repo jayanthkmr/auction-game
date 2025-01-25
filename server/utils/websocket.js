@@ -14,16 +14,15 @@ function broadcastAll(wss, message) {
 }
 
 function broadcastBidStatus(wss, game) {
-  const message = {
+  broadcastAll(wss, {
     type: 'BID_STATUS',
-    p1Name: game.player1.name,
-    p2Name: game.player2.name,
-    p1Submitted: game.player1.bidSubmitted,
-    p2Submitted: game.player2.bidSubmitted,
-    turnNumber: game.currentTurn + 1
-  };
-
-  broadcastAll(wss, message);
+    p1Name: game.players[0].name,
+    p2Name: game.players[1].name,
+    p1Submitted: game.players[0].lastBid !== null,
+    p2Submitted: game.players[1].lastBid !== null,
+    turnNumber: game.turnNumber,
+    maxTurns: game.maxTurns
+  });
 }
 
 module.exports = {
