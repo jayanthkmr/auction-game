@@ -8,6 +8,7 @@ const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
 const fs = require('fs');
+const { AIPlayer, AI_NAMES } = require('./ai_agents');
 
 //////////////////////////////////
 // Basic Setup
@@ -75,6 +76,8 @@ try {
   fs.writeFileSync('leaderboard.json', JSON.stringify(leaderboardData, null, 2));
 }
 
+const aiPlayers = {};
+
 function initGame() {
   console.log("Initializing game state...");
   gamePasscode = null;
@@ -121,6 +124,56 @@ function broadcastBidStatus() {
     p2Name: p2.name,
     p2Submitted: p2.hasSubmitted,
   });
+}
+
+async function handleAIBid(playerName) {
+  const player = players[playerName];
+  const aiPlayer = aiPlayers[playerName];
+  
+  if (!player || !aiPlayer || player.hasSubmitted) return;
+  
+  // Get opponent info
+  const playerArray = Object.values(players);
+  const opponent = playerArray.find(p => p.name !== playerName);
+  if (!opponent) return;
+  
+  // Prepare game state for AI
+  const gameState = {
+    myMoney: player.money,
+    bottlePosition: scotchPosition,
+    turnNumber,
+    maxTurns: MAX_TURNS,
+    opponentName: opponent.name
+  };
+  
+  try {
+    console.log(`Getting AI bid for ${playerName}...`);
+    const bid = await aiPlayer.decideBid(gameState);
+    console.log(`AI ${playerName} decided to bid: $${bid}`);
+    
+    // Submit the bid
+    player.lastBid = bid;
+    player.hasSubmitted = true;
+    
+    // Broadcast bid status
+    broadcastBidStatus();
+    
+    // Check if both players have submitted
+    if (playerArray.every(p => p.hasSubmitted)) {
+      resolveTurn();
+    }
+  } catch (error) {
+    console.error(`Error getting AI bid for ${playerName}:`, error);
+    // Fallback to a random bid in case of error
+    const fallbackBid = Math.floor(Math.random() * (player.money + 1));
+    player.lastBid = fallbackBid;
+    player.hasSubmitted = true;
+    broadcastBidStatus();
+    
+    if (playerArray.every(p => p.hasSubmitted)) {
+      resolveTurn();
+    }
+  }
 }
 
 function resolveTurn() {
@@ -200,11 +253,59 @@ function resolveTurn() {
     });
   });
 
+  // Update AI history if applicable
+  if (p1.isAI) {
+    aiPlayers[p1.name].addToHistory({
+      turnNumber,
+      myBid: p1.lastBid,
+      opponentBid: p2.lastBid,
+      won: winner === 1
+    });
+  }
+  if (p2.isAI) {
+    aiPlayers[p2.name].addToHistory({
+      turnNumber,
+      myBid: p2.lastBid,
+      opponentBid: p1.lastBid,
+      won: winner === 2
+    });
+  }
+
   if (gameOver) {
+    // Determine final winner based on position
+    const finalWinner = scotchPosition <= 4 ? p1.name : 
+                       scotchPosition >= 6 ? p2.name : 
+                       scotchPosition === 5 ? (p1.money > p2.money ? p1.name : p2.name) : // If still in middle, higher money wins
+                       p1.name; // Default to p1 only in case of complete tie
+    const finalLoser = finalWinner === p1.name ? p2.name : p1.name;
+
+    // Update leaderboard and get rating changes
+    const ratingChanges = updateLeaderboard(finalWinner, finalLoser);
+
+    // Don't add an extra turn to history, just send the final state
+    const finalState = {
+      finalWinner,
+      finalLoser,
+      p1Name: p1.name,
+      p2Name: p2.name,
+      p1MoneyAfter: p1.money,
+      p2MoneyAfter: p2.money,
+      newPosition: scotchPosition
+    };
+
+    // Broadcast game over with turn history and rating changes
     broadcastAll({
       type: "GAME_OVER",
-      turnHistory
+      turnHistory,
+      ratingChanges,
+      finalState,
+      finalPosition: scotchPosition,
+      winner: finalWinner
     });
+
+    // Broadcast updated leaderboard to all clients
+    broadcastLeaderboard();
+
     // Reset game after short delay
     setTimeout(initGame, 5000);
   } else {
@@ -215,6 +316,10 @@ function resolveTurn() {
     p1.lastBid = 0;
     p2.lastBid = 0;
     broadcastBidStatus();
+
+    // Trigger AI bids for next turn if game continues
+    if (p1.isAI) setTimeout(() => handleAIBid(p1.name), 1000);
+    if (p2.isAI) setTimeout(() => handleAIBid(p2.name), 1000);
   }
 }
 
@@ -329,7 +434,7 @@ wss.on("connection", (ws) => {
     switch (data.type) {
       // Player login
       case "LOGIN": {
-        const { playerName, passcode, showBids } = data;
+        const { playerName, passcode, showBids, isAI, aiType } = data;
         console.log(`LOGIN attempt => Name: "${playerName}", Pass: "${passcode}"`);
         if (!playerName || !passcode) {
           console.log("LOGIN_ERROR: Name/passcode missing.");
@@ -343,8 +448,8 @@ wss.on("connection", (ws) => {
         if (!gamePasscode) {
           gamePasscode = passcode;
           console.log(`Set gamePasscode to "${passcode}".`);
-        } else {
-          // Must match
+        } else if (!isAI) {
+          // Only check passcode match for human players
           if (passcode !== gamePasscode) {
             console.log("LOGIN_ERROR: Passcode mismatch.");
             return sendMessage(ws, {
@@ -355,7 +460,7 @@ wss.on("connection", (ws) => {
         }
 
         // Name already used with a different passcode?
-        if (players[playerName] && players[playerName].passcode !== passcode) {
+        if (players[playerName] && !isAI && players[playerName].passcode !== passcode) {
           console.log("LOGIN_ERROR: Name used with different passcode.");
           return sendMessage(ws, {
             type: "LOGIN_ERROR",
@@ -377,20 +482,32 @@ wss.on("connection", (ws) => {
           showBidsMode = showBids;
         }
 
-        // Register or update
+        // Handle AI player creation
+        if (isAI) {
+          if (!aiPlayers[playerName]) {
+            aiPlayers[playerName] = new AIPlayer(playerName, aiType);
+          }
+          // Reset AI history for new game
+          aiPlayers[playerName].resetHistory();
+        }
+
+        // Register or update player
         if (!players[playerName]) {
           players[playerName] = {
-            passcode,
+            passcode: isAI ? 'ai_player' : passcode, // Use different passcode for AI
             ws,
             money: START_MONEY,
             hasSubmitted: false,
             lastBid: 0,
             name: playerName,
+            isAI: isAI
           };
-          console.log(`New player "${playerName}" joined with passcode "${passcode}". Starting money: ${START_MONEY}`);
-        } else {
+          console.log(`New player "${playerName}" joined${isAI ? ' as AI' : ` with passcode "${passcode}"`}. Starting money: ${START_MONEY}`);
+        } else if (isAI || players[playerName].passcode === passcode) {
+          // Only update connection if it's an AI or matching passcode
           players[playerName].ws = ws;
-          console.log(`Player "${playerName}" reconnected. Current money: ${players[playerName].money}`);
+          players[playerName].isAI = isAI;
+          console.log(`Player "${playerName}" ${isAI ? '(AI) ' : ''}reconnected. Current money: ${players[playerName].money}`);
         }
 
         // Send success with show bids mode
@@ -402,9 +519,17 @@ wss.on("connection", (ws) => {
           isFirstPlayer: Object.keys(players).length === 1
         });
         
-        // If two players are connected, broadcast bid status
+        // If two players are connected, broadcast bid status and trigger AI bids
         if (Object.keys(players).length === 2) {
           broadcastBidStatus();
+          
+          // Trigger AI bids after a short delay
+          const playerArray = Object.values(players);
+          playerArray.forEach(player => {
+            if (player.isAI) {
+              setTimeout(() => handleAIBid(player.name), 1000);
+            }
+          });
         }
         break;
       }

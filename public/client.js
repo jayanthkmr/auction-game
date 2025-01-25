@@ -46,6 +46,12 @@ let showBidsMode = false;
 // Add to your existing state variables at the top
 let lastRatingChanges = null;
 
+// Add these constants at the top
+const AI_NAMES = {
+  CLAUDE: "Claude-AI",
+  GPT4: "GPT4-AI"
+};
+
 //////////////////////////////////////////////////
 // Setup Canvas & Scotch Image
 //////////////////////////////////////////////////
@@ -296,7 +302,14 @@ function handleServerMessage(data) {
       document.getElementById("loginPanel").style.display = "none";
       document.getElementById("audiencePanel").style.display = "none";
       document.getElementById("gamePanel").style.display = "block";
-      document.getElementById("playerNameSpan").textContent = myPlayerName;
+      
+      // Update greeting message based on game mode
+      const gameMode = document.querySelector('input[name="gameMode"]:checked')?.value;
+      if (gameMode === 'ai_vs_ai') {
+        document.getElementById("playerNameSpan").textContent = "AI Match (Spectator)";
+      } else {
+        document.getElementById("playerNameSpan").textContent = myPlayerName;
+      }
       
       // Show initial money
       const myStatsDiv = document.getElementById("myStats");
@@ -397,15 +410,23 @@ function handleServerMessage(data) {
     // Full game over with replay info
     case "GAME_OVER":
       finalTurnHistory = data.turnHistory;
+      gameState.finalState = data.finalState; // Store final state for replay
       showStatus("Game Over!");
       document.getElementById("replaySection").style.display = "block";
-      // Store rating changes for leaderboard display
+      
+      // Handle rating changes
       if (data.ratingChanges) {
         lastRatingChanges = data.ratingChanges;
         const winner = data.ratingChanges.winner;
         const loser = data.ratingChanges.loser;
-        showStatus(`Rating changes: ${winner.name} +${winner.ratingChange}, ${loser.name} ${loser.ratingChange}`);
+        
+        // Show rating changes in status
+        showStatus(`🏆 ${winner.name} wins!`);
+        showStatus(`Rating changes:`);
+        showStatus(`${winner.name}: +${winner.ratingChange} (${Math.round(winner.newRating)})`);
+        showStatus(`${loser.name}: ${loser.ratingChange} (${Math.round(loser.newRating)})`);
       }
+      
       // If there's a disconnect field, show that
       if (data.disconnect) {
         showStatus(`Player [${data.disconnect}] disconnected. Game ended.`);
@@ -434,6 +455,8 @@ function loginAsPlayer() {
   const name = document.getElementById("nameInput").value.trim();
   const pass = document.getElementById("passInput").value.trim();
   const showBidsCheck = document.getElementById("showBidsCheck");
+  const gameMode = document.querySelector('input[name="gameMode"]:checked').value;
+  
   document.getElementById("loginError").textContent = "";
   
   if (!name || !pass) {
@@ -445,15 +468,57 @@ function loginAsPlayer() {
     document.getElementById("loginError").textContent = "Connection not ready. Please try again in a moment.";
     return;
   }
-  
-  ws.send(
-    JSON.stringify({
+
+  // Handle AI vs AI match
+  if (gameMode === 'ai_vs_ai') {
+    ws.send(JSON.stringify({
       type: "LOGIN",
-      playerName: name,
+      playerName: AI_NAMES.CLAUDE,
       passcode: pass,
-      showBids: showBidsCheck.checked
-    })
-  );
+      showBids: showBidsCheck.checked,
+      isAI: true,
+      aiType: 'claude'
+    }));
+
+    setTimeout(() => {
+      ws.send(JSON.stringify({
+        type: "LOGIN",
+        playerName: AI_NAMES.GPT4,
+        passcode: pass,
+        isAI: true,
+        aiType: 'openai'
+      }));
+    }, 500);
+
+    // Join as audience to watch
+    setTimeout(() => {
+      joinAsAudience();
+    }, 1000);
+    
+    return;
+  }
+
+  // Handle human vs AI or human vs human
+  ws.send(JSON.stringify({
+    type: "LOGIN",
+    playerName: name,
+    passcode: pass,
+    showBids: showBidsCheck.checked,
+    isAI: false
+  }));
+
+  // If playing against AI, automatically log in the AI opponent
+  if (gameMode !== 'human') {
+    setTimeout(() => {
+      ws.send(JSON.stringify({
+        type: "LOGIN",
+        playerName: gameMode === 'claude' ? AI_NAMES.CLAUDE : AI_NAMES.GPT4,
+        passcode: pass,
+        isAI: true,
+        aiType: gameMode === 'claude' ? 'claude' : 'openai'
+      }));
+    }, 500);
+  }
 }
 
 function joinAsAudience() {
@@ -564,10 +629,8 @@ function updateBidStatus(data) {
     other = { name: data.p1Name, submitted: data.p1Submitted };
   }
 
-  const meSubText = me.submitted ? "✓ You have submitted" : "❌ You have NOT submitted";
-  const otherSubText = other.submitted
-    ? `✓ ${other.name} has submitted`
-    : `❌ ${other.name} has NOT submitted`;
+  const meSubText = me.submitted ? `✓ ${me.name} has submitted` : `❌ ${me.name} has NOT submitted`;
+  const otherSubText = other.submitted ? `✓ ${other.name} has submitted` : `❌ ${other.name} has NOT submitted`;
 
   document.getElementById("otherPlayerStatus").textContent = `${meSubText} | ${otherSubText}`;
 }
@@ -590,17 +653,19 @@ function startReplay() {
 function replayNextTurn() {
   const rm = document.getElementById("replayMessages");
   if (replayIndex >= finalTurnHistory.length) {
-    const lastTurn = finalTurnHistory[finalTurnHistory.length - 1];
-    const winner = lastTurn.newPosition <= 0 ? lastTurn.p1Name : 
-                  lastTurn.newPosition >= 10 ? lastTurn.p2Name : 
-                  lastTurn.p1Name;
+    // Get final state from game over data
+    const finalState = gameState.finalState;
+    if (!finalState) {
+      console.error("Missing final state in game over data");
+      return;
+    }
     
     rm.textContent += `\n=== FINAL RESULT ===\n\n`;
-    rm.textContent += `Bottle final position: ${lastTurn.newPosition}\n`;
-    rm.textContent += `🏆 ${winner} WINS THE GAME! 🏆\n\n`;
+    rm.textContent += `Bottle final position: ${finalState.newPosition}\n`;
+    rm.textContent += `🏆 ${finalState.finalWinner} WINS THE GAME! 🏆\n\n`;
     rm.textContent += `Final Money:\n`;
-    rm.textContent += `${lastTurn.p1Name}: $${lastTurn.p1MoneyAfter}\n`;
-    rm.textContent += `${lastTurn.p2Name}: $${lastTurn.p2MoneyAfter}\n`;
+    rm.textContent += `${finalState.p1Name}: $${finalState.p1MoneyAfter}\n`;
+    rm.textContent += `${finalState.p2Name}: $${finalState.p2MoneyAfter}\n`;
     return;
   }
   
