@@ -4,42 +4,43 @@ const { broadcastAll, broadcastBidStatus } = require('./utils/websocket');
 const { handleAIBid } = require('./services/gameService');
 
 class MessageHandler {
-  constructor(gameManager, wss) {
-    this.gameManager = gameManager;
+  constructor(wss, gameManager, leaderboard) {
     this.wss = wss;
+    this.gameManager = gameManager;
+    this.leaderboard = leaderboard;
   }
 
-  // Handle incoming messages
-  async handleMessage(ws, rawData) {
+  handleMessage(ws, message) {
     try {
-      const message = createMessage(rawData);
+      const data = JSON.parse(message);
+      console.log('Received message:', data);
       
-      if (!message.validate()) {
+      if (!data.type) {
         throw new Error('Invalid message format');
       }
 
-      switch (message.type) {
+      switch (data.type.toUpperCase()) {
         case 'LOGIN':
-          await this.handleLogin(ws, message.data);
+          this.handleLogin(ws, data);
           break;
         case 'AUDIENCE_JOIN':
-          await this.handleAudienceJoin(ws);
-          break;
-        case 'START_GAME':
-          await this.handleStartGame(ws, message.data);
+          this.handleAudienceJoin(ws);
           break;
         case 'SUBMIT_BID':
-          await this.handleBid(ws, message.data);
+          this.handleBid(ws, data);
           break;
         case 'REQUEST_LEADERBOARD':
-          await this.handleLeaderboardRequest(ws);
+          this.handleLeaderboardRequest(ws);
+          break;
+        case 'START_GAME':
+          this.handleStartGame(ws, data);
           break;
         default:
-          throw new Error(`Unknown message type: ${message.type}`);
+          console.warn('Unknown message type:', data.type);
+          throw new Error('Unknown message type: ' + data.type);
       }
     } catch (error) {
       console.error('Error handling message:', error);
-      // Send error response to client
       ws.send(JSON.stringify({
         type: 'ERROR',
         message: error.message
@@ -47,45 +48,42 @@ class MessageHandler {
     }
   }
 
-  // Handle login messages
-  async handleLogin(ws, data) {
+  handleLogin(ws, data) {
     const { playerName, passcode, showBids, isAI, aiType, isFirstPlayer } = data;
     
-    // Validate login
-    if (!this.gameManager.validateLogin(playerName, passcode)) {
-      throw new Error('Invalid login credentials');
+    // Validate input
+    if (!playerName || playerName.length > 20) {
+      throw new Error('Invalid name');
     }
 
-    // Create player
-    const player = await this.gameManager.createPlayer({
-      name: playerName,
-      isAI,
-      aiType,
-      ws,
-      showBids,
-      isFirstPlayer
-    });
-
-    // Send success response
+    // Create player and start/join game
+    const game = this.gameManager.handlePlayerJoin(ws, playerName, isAI, aiType, showBids, isFirstPlayer);
+    
+    // Send login success response
     ws.send(JSON.stringify({
       type: 'LOGIN_SUCCESS',
-      playerName: player.name,
-      money: player.money,
+      playerName: playerName,
+      money: 100,
       showBidsMode: showBids,
-      isFirstPlayer,
-      isAI
+      isFirstPlayer: isFirstPlayer,
+      isAI: isAI
     }));
 
-    // Broadcast updated game state
-    this.gameManager.broadcastGameState();
+    // If this completes a game, broadcast state
+    if (game) {
+      this.gameManager.broadcastGameState(game);
+    }
   }
 
-  async handleAudienceJoin(ws) {
-    ws.send(JSON.stringify({ type: 'AUDIENCE_OK' }));
+  handleAudienceJoin(ws) {
+    this.gameManager.handleAudienceJoin(ws);
+    
+    ws.send(JSON.stringify({
+      type: 'AUDIENCE_OK'
+    }));
   }
 
-  // Handle start game messages
-  async handleStartGame(ws, data) {
+  handleStartGame(ws, data) {
     const { playerName } = data;
     const game = this.gameManager.getGameByPlayer(playerName);
     
@@ -93,55 +91,40 @@ class MessageHandler {
       throw new Error('Game not found');
     }
 
+    // Start the game
     game.status = 'active';
     this.gameManager.broadcastGameState(game);
 
     // For AI vs AI games, trigger initial bids
-    if (this.gameManager.isAIGame(game)) {
-      if (game.player1.isAI) {
-        await handleAIBid(game, game.player1);
-      }
-      if (game.player2.isAI) {
-        await handleAIBid(game, game.player2);
-      }
+    if (game.players.some(p => p.isAI)) {
+      game.players.forEach(player => {
+        if (player.isAI) {
+          handleAIBid(game, player);
+        }
+      });
     }
   }
 
-  // Handle bid submission messages
-  async handleBid(ws, data) {
+  handleBid(ws, data) {
     const { playerName, bid } = data;
-    const game = this.gameManager.getGameByPlayer(playerName);
     
-    if (!game) {
-      throw new Error('Game not found');
+    if (typeof bid !== 'number' || bid < 0) {
+      throw new Error('Invalid bid amount');
     }
 
-    await this.gameManager.submitBid(game, playerName, bid);
-    
-    // If both players have bid, resolve the turn
-    if (game.player1.bidSubmitted && game.player2.bidSubmitted) {
-      await this.gameManager.resolveTurn(game);
-      
-      // Request next AI bids if needed
-      if (this.gameManager.isAIGame(game) && game.status === 'active') {
-        if (game.player1.isAI) {
-          await handleAIBid(game, game.player1);
-        }
-        if (game.player2.isAI) {
-          await handleAIBid(game, game.player2);
-        }
-      }
-    } else {
-      broadcastBidStatus(this.wss, game);
+    const success = this.gameManager.placeBid(ws, bid);
+    if (!success) {
+      throw new Error('Failed to place bid');
     }
   }
 
-  async handleLeaderboardRequest(ws) {
+  handleLeaderboardRequest(ws) {
+    const leaderboardData = this.leaderboard.getLeaderboard();
     ws.send(JSON.stringify({
       type: 'LEADERBOARD_UPDATE',
-      leaderboard: this.gameManager.leaderboard.getLeaderboard()
+      leaderboard: leaderboardData
     }));
   }
 }
 
-module.exports = MessageHandler; 
+module.exports = { MessageHandler }; 

@@ -3,42 +3,34 @@ class LeaderboardManager {
     this.players = new Map();
   }
 
-  addPlayer(name, rating = 1500) {
-    if (!this.players.has(name)) {
-      this.players.set(name, {
-        name,
-        rating,
-        wins: 0,
-        losses: 0,
-        gamesPlayed: 0
-      });
+  addPlayer(player) {
+    if (!this.players.has(player.name)) {
+      this.players.set(player.name, player);
     }
-    return this.players.get(name);
   }
 
-  updateRatings(winner, loser, winnerDelta, loserDelta) {
-    const winnerStats = this.players.get(winner.name) || this.addPlayer(winner.name, winner.rating);
-    const loserStats = this.players.get(loser.name) || this.addPlayer(loser.name, loser.rating);
+  updateRatings(winner, loser) {
+    const K = 32; // K-factor for ELO calculation
+    const expectedScore = 1 / (1 + Math.pow(10, (loser.rating - winner.rating) / 400));
+    const ratingChange = Math.round(K * (1 - expectedScore));
 
-    winnerStats.rating += winnerDelta;
-    loserStats.rating += loserDelta;
-    
-    winnerStats.wins++;
-    loserStats.losses++;
-    winnerStats.gamesPlayed++;
-    loserStats.gamesPlayed++;
+    winner.updateRating(winner.rating + ratingChange);
+    loser.updateRating(loser.rating - ratingChange);
+
+    return ratingChange;
   }
 
   getLeaderboard() {
     return Array.from(this.players.values())
-      .sort((a, b) => b.rating - a.rating)
       .map(player => ({
         name: player.name,
         rating: player.rating,
         wins: player.wins,
         losses: player.losses,
-        gamesPlayed: player.gamesPlayed
-      }));
+        gamesPlayed: player.gamesPlayed,
+        winRate: player.gamesPlayed > 0 ? (player.wins / player.gamesPlayed) : 0
+      }))
+      .sort((a, b) => b.rating - a.rating);
   }
 }
 

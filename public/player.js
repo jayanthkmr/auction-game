@@ -13,6 +13,10 @@
       this.lastBid = null;
       this.bidSubmitted = false;
       this.rating = 1500; // Starting ELO rating
+      this.wins = 0;
+      this.losses = 0;
+      this.gamesPlayed = 0;
+      this.bidHistory = [];
       this.gameState = {
         money: 100,
         lastBid: 0,
@@ -74,6 +78,10 @@
         history: [],
         turnNumber: 1
       };
+      this.wins = 0;
+      this.losses = 0;
+      this.gamesPlayed = 0;
+      this.bidHistory = [];
     }
   
     // Update player's position on the board
@@ -98,8 +106,47 @@
     }
   
     updateRating(change) {
+      const oldRating = this.rating;
       this.rating += change;
       if (this.rating < 0) this.rating = 0;
+      return this.rating - oldRating;
+    }
+  
+    placeBid(amount) {
+      if (amount > this.money || amount < 0) {
+        throw new Error('Invalid bid amount');
+      }
+      this.lastBid = amount;
+      this.bidHistory.push(amount);
+      return amount;
+    }
+  
+    payBid() {
+      if (this.lastBid === null) {
+        throw new Error('No bid placed');
+      }
+      this.money -= this.lastBid;
+      return this.lastBid;
+    }
+  
+    recordGameResult(won) {
+      if (won) {
+        this.wins++;
+      } else {
+        this.losses++;
+      }
+      this.gamesPlayed++;
+    }
+  
+    getStats() {
+      return {
+        name: this.name,
+        rating: this.rating,
+        wins: this.wins,
+        losses: this.losses,
+        gamesPlayed: this.gamesPlayed,
+        winRate: this.gamesPlayed > 0 ? (this.wins / this.gamesPlayed) : 0
+      };
     }
   
     toJSON() {
@@ -111,7 +158,12 @@
         isFirstPlayer: this.isFirstPlayer,
         money: this.money,
         rating: this.rating,
-        bidSubmitted: this.bidSubmitted
+        bidSubmitted: this.bidSubmitted,
+        wins: this.wins,
+        losses: this.losses,
+        gamesPlayed: this.gamesPlayed,
+        lastBid: this.lastBid,
+        bidHistory: this.bidHistory
       };
     }
   }

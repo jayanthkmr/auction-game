@@ -5,9 +5,10 @@ function sendMessage(ws, message) {
 }
 
 function broadcastAll(wss, message) {
+  const messageStr = JSON.stringify(message);
   wss.clients.forEach(client => {
     if (client.readyState === 1) { // WebSocket.OPEN
-      client.send(JSON.stringify(message));
+      client.send(messageStr);
     }
   });
 }

@@ -93,7 +93,8 @@
     }
 
     input[type="text"],
-    input[type="password"] {
+    input[type="password"],
+    input[type="number"] {
       font-family: 'Roboto', sans-serif;
       font-size: 1em;
       padding: 8px 12px;
@@ -257,8 +258,8 @@
     }
 
     .rating-change {
-      font-size: 0.8em;
-      margin-left: 8px;
+      font-size: 0.9em;
+      margin-left: 5px;
     }
 
     .rating-up {
@@ -280,6 +281,29 @@
 
     .player-rank-3 {
       color: #cd7f32;
+    }
+
+    .game-mode-options {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin: 15px 0;
+    }
+
+    .game-mode-option {
+      padding: 10px;
+      border: 1px solid #ffcc00;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .game-mode-option:hover {
+      background: rgba(255, 204, 0, 0.1);
+    }
+
+    .game-mode-option input[type="radio"] {
+      margin-right: 10px;
     }
   </style>
 </head>
@@ -333,145 +357,90 @@
       </div>
     </div>
 
-    <!-- Rest of your existing HTML structure -->
+    <!-- Login Panel -->
     <div id="loginPanel" class="panel">
-      <h3>�� Login as Player</h3>
-      <label>Player Name:
-        <input id="nameInput" type="text" placeholder="Enter your name" />
-      </label>
-      <label>Game Passcode:
-        <input id="passInput" type="password" placeholder="Enter passcode" />
-      </label>
-      <div style="margin: 15px 0;">
-        <h4>🎮 Game Mode</h4>
-        <div style="margin: 10px 0;">
-<!-- Game Rules Panel -->
-<div id="rulesPanel" class="panel">
-  <h3>📜 Game Rules</h3>
-  <div class="rules-grid">
-    <div class="rule-card">
-      <h4>🎮 Basic Setup</h4>
-      <ul>
-        <li>2 players compete</li>
-        <li>Each starts with $100</li>
-        <li>Bottle starts in middle (position 5)</li>
-      </ul>
+      <h2>Join Game</h2>
+      <div>
+        <label for="nameInput">Your Name:</label>
+        <input type="text" id="nameInput" maxlength="20" placeholder="Enter your name">
+      </div>
+      <div>
+        <label for="passInput">Passcode:</label>
+        <input type="password" id="passInput" maxlength="20" placeholder="Enter passcode">
+      </div>
+      <div>
+        <label>
+          <input type="checkbox" id="showBidsCheck"> Show all bids after each turn
+        </label>
+      </div>
+      <div class="game-mode-options">
+        <label class="game-mode-option">
+          <input type="radio" name="gameMode" value="human" checked> Human vs Human
+        </label>
+        <label class="game-mode-option">
+          <input type="radio" name="gameMode" value="claude"> Play vs Claude
+        </label>
+        <label class="game-mode-option">
+          <input type="radio" name="gameMode" value="gpt4"> Play vs GPT-4
+        </label>
+        <label class="game-mode-option">
+          <input type="radio" name="gameMode" value="ai_vs_ai"> Watch AI vs AI
+        </label>
+      </div>
+      <div>
+        <button onclick="loginAsPlayer()">Join Game</button>
+        <button onclick="joinAsAudience()">Join as Spectator</button>
+      </div>
+      <div id="loginError" style="color: #ff3333; margin-top: 10px;"></div>
     </div>
-    <div class="rule-card">
-      <h4>💰 Bidding</h4>
-      <ul>
-        <li>Players bid secretly each turn</li>
-        <li>Higher bid wins the turn</li>
-        <li>Winner pays their bid</li>
-        <li>Loser keeps their money</li>
-      </ul>
+
+    <!-- Game Panel -->
+    <div id="gamePanel" class="panel" style="display: none;">
+      <h2>Welcome, <span id="playerNameSpan">Player</span>!</h2>
+      
+      <canvas id="gameCanvas" width="600" height="200"></canvas>
+      
+      <div id="turnDisplay">Turn 1 of 5</div>
+      
+      <div id="myStats">Your Money: $100</div>
+      
+      <div class="bid-section">
+        <label for="bidInput">Your Bid (max $100):</label>
+        <input type="number" id="bidInput" min="0" max="100" step="1">
+        <button onclick="submitBid()">Submit Bid</button>
+      </div>
+      
+      <div id="statusArea"></div>
+      
+      <div id="replaySection" style="display: none;">
+        <h3>Game Replay</h3>
+        <button onclick="startReplay()">Start Replay</button>
+        <div id="replayMessages"></div>
+      </div>
     </div>
-    <div class="rule-card">
-      <h4>🎯 Movement</h4>
-      <ul>
-        <li>Winner moves bottle 1 step their way</li>
-        <li>Player 1 moves left (0)</li>
-        <li>Player 2 moves right (10)</li>
-      </ul>
+
+    <!-- Leaderboard -->
+    <div id="leaderboardPanel" class="panel">
+      <h2>Leaderboard</h2>
+      <table id="leaderboardTable">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Player</th>
+            <th>Rating</th>
+            <th>W/L</th>
+            <th>Games</th>
+            <th>Win Rate</th>
+          </tr>
+        </thead>
+        <tbody>
+        </tbody>
+      </table>
     </div>
-    <div class="rule-card">
-      <h4>🏆 Winning</h4>
-      <ul>
-        <li>Get bottle to your end (0 or 10)</li>
-        <li>Or have most progress after 5 turns</li>
-        <li>Ties use alternating advantage</li>
-      </ul>
-    </div>
-  </div>
-</div>
+  </main>
 
-<!-- Rest of your existing HTML structure -->
-<div id="loginPanel" class="panel">
-  <h3>🎮 Login as Player</h3>
-  <label>Player Name:
-    <input id="nameInput" type="text" placeholder="Enter your name" />
-  </label>
-  <label>Game Passcode:
-    <input id="passInput" type="password" placeholder="Enter passcode" />
-  </label>
-  <div style="margin: 15px 0;">
-    <h4>🎮 Game Mode</h4>
-    <div style="margin: 10px 0;">
-      <label style="display: inline-block; margin-right: 15px;">
-        <input type="radio" name="gameMode" value="human" checked> vs Human
-      </label>
-      <label style="display: inline-block; margin-right: 15px;">
-        <input type="radio" name="gameMode" value="claude"> vs Claude AI
-      </label>
-      <label style="display: inline-block; margin-right: 15px;">
-        <input type="radio" name="gameMode" value="gpt4"> vs GPT-4 AI
-      </label>
-      <label style="display: inline-block;">
-        <input type="radio" name="gameMode" value="ai_vs_ai"> Watch AI vs AI
-      </label>
-    </div>
-  </div>
-  <div style="margin: 15px 0;">
-    <label style="cursor: pointer;" title="First player sets this option for the game">
-      <input type="checkbox" id="showBidsCheck" /> Show all bids after each turn
-    </label>
-  </div>
-  <button onclick="loginAsPlayer()">Start Playing</button>
-  <span id="loginError"></span>
-</div>
-
-<div id="audiencePanel" class="panel">
-  <h3>👥 Or Join as Audience</h3>
-  <button onclick="joinAsAudience()">Watch Game</button>
-</div>
-
-<div id="gamePanel" class="panel" style="display:none;">
-  <h2>Welcome, <span id="playerNameSpan"></span>! 🎉</h2>
-
-  <canvas id="gameCanvas" width="600" height="200"></canvas>
-  
-  <div class="bid-section">
-    <h3 class="turn-counter">Turn <span id="currentTurn">1</span>/<span id="maxTurns">5</span></h3>
-    <label for="bidInput">Your Bid (max $100): </label>
-    <input id="bidInput" class="bidField" type="text" placeholder="Enter bid amount" />
-    <button onclick="submitBid()">Place Bid 💰</button>
-  </div>
-  
-  <div id="myStats"></div>
-  <div id="otherPlayerStatus"></div>
-  <div id="statusArea"></div>
-  
-  <div id="replaySection" style="display:none;">
-    <h3>🎬 Game Replay</h3>
-    <button onclick="startReplay()">View Turn-by-Turn Replay</button>
-    <div id="replayMessages"></div>
-  </div>
-</div>
-
-<div id="leaderboardPanel" class="panel">
-  <h3>🏆 Leaderboard</h3>
-  <div id="leaderboardContent">
-    <table id="leaderboardTable">
-      <thead>
-        <tr>
-          <th>Rank</th>
-          <th>Player</th>
-          <th>Rating</th>
-          <th>W/L</th>
-          <th>Games</th>
-          <th>Win Rate</th>
-        </tr>
-      </thead>
-      <tbody>
-        <!-- Filled dynamically -->
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<!-- Load scripts -->
-<script src="player.js"></script>
-<script src="client.js"></script>
-
+  <!-- Load scripts -->
+  <script src="player.js"></script>
+  <script src="client.js"></script>
 </body>
 </html>

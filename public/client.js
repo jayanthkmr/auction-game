@@ -47,6 +47,19 @@ const AI_NAMES = {
   GPT4: "GPT4-AI"
 };
 
+// WebSocket connection
+let gameState = {
+    currentTurn: 1,
+    maxTurns: 5,
+    myMoney: 100,
+    bottlePosition: 5,
+    playerNumber: null,
+    playerName: '',
+    isSpectator: false,
+    showBids: false,
+    gameMode: 'human'
+};
+
 //////////////////////////////////////////////////
 // Setup Canvas & Scotch Image
 //////////////////////////////////////////////////
@@ -108,36 +121,10 @@ function drawBaseline(pos) {
   }
 
   // Draw Player 1 label and arrow (left side)
-  ctx.fillStyle = "#ff3333"; // Red for Player 1
-  ctx.font = "bold 16px Arial";
-  ctx.textAlign = "center";
-  // Draw name inside canvas bounds
-  ctx.fillText(p1Name, 80, 50);
+  drawPlayerLabel(p1Name, 80, 50, true);
   
-  // Draw arrow for Player 1's direction
-  ctx.beginPath();
-  ctx.moveTo(95, 60);
-  ctx.lineTo(80, 75);
-  ctx.lineTo(95, 90);
-  ctx.strokeStyle = "#ff3333";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
   // Draw Player 2 label and arrow (right side)
-  ctx.fillStyle = "#33ff33"; // Green for Player 2
-  ctx.font = "bold 16px Arial";
-  ctx.textAlign = "center";
-  // Draw name inside canvas bounds
-  ctx.fillText(p2Name, 520, 50);
-  
-  // Draw arrow for Player 2's direction
-  ctx.beginPath();
-  ctx.moveTo(505, 60);
-  ctx.lineTo(520, 75);
-  ctx.lineTo(505, 90);
-  ctx.strokeStyle = "#33ff33";
-  ctx.lineWidth = 2;
-  ctx.stroke();
+  drawPlayerLabel(p2Name, 520, 50, false);
 
   // Highlight current position with contrasting color
   const currentX = posToX(pos);
@@ -150,6 +137,28 @@ function drawBaseline(pos) {
   ctx.stroke();
 
   drawScotch(pos);
+}
+
+function drawPlayerLabel(name, x, y, isPlayer1) {
+  ctx.fillStyle = isPlayer1 ? "#ff3333" : "#33ff33";
+  ctx.font = "bold 16px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(name, x, y);
+  
+  // Draw arrow
+  ctx.beginPath();
+  if (isPlayer1) {
+    ctx.moveTo(x + 15, y + 10);
+    ctx.lineTo(x, y + 25);
+    ctx.lineTo(x + 15, y + 40);
+  } else {
+    ctx.moveTo(x - 15, y + 10);
+    ctx.lineTo(x, y + 25);
+    ctx.lineTo(x - 15, y + 40);
+  }
+  ctx.strokeStyle = isPlayer1 ? "#ff3333" : "#33ff33";
+  ctx.lineWidth = 2;
+  ctx.stroke();
 }
 
 // Convert position to X coordinate
@@ -285,282 +294,237 @@ function connectWebSocket() {
 // Handle messages from server
 function handleServerMessage(data) {
   switch (data.type) {
-    // Player login error
-    case "LOGIN_ERROR":
-      document.getElementById("loginError").textContent = data.message;
+    case 'ERROR':
+      showError(data.message);
       break;
 
-    // Player login success
-    case "LOGIN_SUCCESS":
-      const isHumanLogin = !data.isAI;
-      
-      if (isHumanLogin) {
-        myPlayer = new Player(data.playerName);
-        myPlayer.updateGameState({
-          money: data.money,
-          turnNumber: 1,
-          maxTurns: MAX_TURNS
-        });
-        
-        loggedIn = true;
-        isAudience = false;
-        showBidsMode = data.showBidsMode;
-        
-        // Update UI
-        document.getElementById("loginPanel").style.display = "none";
-        document.getElementById("audiencePanel").style.display = "none";
-        document.getElementById("gamePanel").style.display = "block";
-        document.getElementById("playerNameSpan").textContent = myPlayer.name;
-        
-        updatePlayerStats();
-        updateTurnDisplay();
-        updateBidInput();
-        
-        showStatus(`Logged in with $${myPlayer.gameState.money}`);
-
-        // If there's a pending AI login (Human vs AI mode), send it now
-        if (window.pendingAILogin) {
-          console.log("Sending pending AI login...");
-          ws.send(JSON.stringify(window.pendingAILogin));
-          window.pendingAILogin = null;
-        }
-      } else {
-        // For AI logins, store the player names
-        if (data.playerName === AI_NAMES.CLAUDE) {
-          p1Name = data.playerName;
-        } else if (data.playerName === AI_NAMES.GPT4) {
-          p2Name = data.playerName;
-        }
-        // Redraw the canvas to show updated names
-        drawBaseline(scotchPosition);
-      }
-      
-      // Handle checkbox state
-      const showBidsCheck = document.getElementById("showBidsCheck");
-      if (!data.isFirstPlayer) {
-        showBidsCheck.disabled = true;
-        showBidsCheck.checked = showBidsMode;
-        showBidsCheck.parentElement.style.opacity = "0.5";
-        showBidsCheck.parentElement.title = "Only first player can set this option";
-      }
+    case 'LOGIN_SUCCESS':
+      handleLoginSuccess(data);
       break;
 
-    // Audience just joined
-    case "AUDIENCE_OK":
-      loggedIn = true;
-      isAudience = true;
-      myPlayer = null; // Explicitly set myPlayer to null for audience members
-      document.getElementById("loginPanel").style.display = "none";
-      document.getElementById("audiencePanel").style.display = "none";
-      document.getElementById("gamePanel").style.display = "block";
-      document.getElementById("playerNameSpan").textContent = "(Audience)";
-      // Hide the bid input UI
-      document.getElementById("bidInput").disabled = true;
-      document.querySelector("#bidInput + button").disabled = true;
-      showStatus("You are an Audience member. You can watch but not bid.");
+    case 'AUDIENCE_OK':
+      handleAudienceJoin();
       break;
 
-    // A partial game state for new audience
-    case "GAME_STATE":
-      if (!isAudience && myPlayer) {
-        myPlayer.updateGameState({
-          turnNumber: data.turnNumber,
-          maxTurns: data.maxTurns,
-          isGameOver: data.gameOver,
-          money: data.money,
-          lastBid: data.lastBid
-        });
-      }
-      scotchPosition = data.scotchPosition || 5;
-      drawBaseline(scotchPosition);
-      showStatus(`Turn ${data.turnNumber}/${data.maxTurns}${data.gameOver ? " - Game Over!" : ""}`);
+    case 'GAME_STATE':
+      handleGameState(data);
       break;
 
-    // Turn resolved => animate scotch
-    case "TURN_RESOLVED":
-      console.log("Turn resolved:", data);
-      if (!isAudience && myPlayer) {
-        myPlayer.updateGameState({
-          turnNumber: data.turnNumber,
-          maxTurns: data.maxTurns,
-          money: data.money,
-          lastBid: data.lastBid
-        });
-      }
-      const oldPos = scotchPosition;
-      scotchPosition = data.scotchPosition;
-      
-      // Update turn display
-      const turnDisplay = document.getElementById("turnDisplay");
-      if (turnDisplay) {
-        turnDisplay.textContent = `Turn ${data.turnNumber} of ${data.maxTurns}`;
-      }
-
-      // Show turn result in status
-      const winnerName = data.winner === 1 ? p1Name : p2Name;
-      if (data.tieUsed) {
-        showStatus(`Tie! ${winnerName} won due to advantage`);
-      } else {
-        showStatus(`${winnerName} won the turn!`);
-      }
-
-      // Show bid information if enabled
-      if (showBidsMode) {
-        showStatus(`${p1Name} bid: $${data.p1Bid}, ${p2Name} bid: $${data.p2Bid}`);
-      }
-      
-      animateScotchMove(oldPos, scotchPosition, () => {
-        if (data.gameOver && !isAudience && myPlayer) {
-          myPlayer.updateGameState({
-            isGameOver: true,
-            money: data.money,
-            lastBid: data.lastBid
-          });
-        }
-      });
+    case 'TURN_RESOLVED':
+      handleTurnResolution(data);
       break;
 
-    // This server->client message means forced 0 for missing player
-    case "FORCED_BID":
-      showStatus(data.message);
+    case 'BID_STATUS':
+      handleBidStatus(data);
       break;
 
-    // Private update to me about my money + bid
-    case "PLAYER_UPDATE":
-      if (myPlayer && !isAudience) {
-        myPlayer.updateGameState({
-          money: data.money,
-          lastBid: data.lastBid
-        });
-        updatePlayerStats();
-        updateBidInput();
-      }
+    case 'GAME_OVER':
+      handleGameOver(data);
       break;
 
-    // Show who has/have not submitted
-    case "BID_STATUS":
-      console.log("Bid status:", data);
-      const p1Status = data.p1Submitted ? "✓" : "❌";
-      const p2Status = data.p2Submitted ? "✓" : "❌";
-      
-      // Update player names if provided, using defaults if undefined
-      p1Name = data.p1Name || "Player 1";
-      p2Name = data.p2Name || "Player 2";
-      
-      // Only show status for the current player and their opponent
-      if (isAudience) {
-        // Only show turn number if available
-        const turnInfo = data.turnNumber ? ` - Turn ${data.turnNumber}/${MAX_TURNS}` : '';
-        showStatus(`${p1Name} vs ${p2Name}${turnInfo}`);
-        showStatus(`${p1Status} ${p1Name} ${data.p1Submitted ? "has submitted" : "waiting"} | ${p2Status} ${p2Name} ${data.p2Submitted ? "has submitted" : "waiting"}`);
-      } else if (myPlayer && myPlayer.name === p1Name) {
-        showStatus(`${p1Status} You have ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} ${p2Name} has ${data.p2Submitted ? "" : "NOT "}submitted`);
-      } else if (myPlayer && myPlayer.name === p2Name) {
-        showStatus(`${p1Status} ${p1Name} has ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} You have ${data.p2Submitted ? "" : "NOT "}submitted`);
-      }
-
-      // Redraw canvas to show updated names
-      drawBaseline(scotchPosition);
-      break;
-
-    // Full game over with replay info
-    case "GAME_OVER":
-      finalTurnHistory = data.turnHistory;
-      if (!isAudience && myPlayer) {
-        myPlayer.updateGameState({
-          finalState: data.finalState,
-          isGameOver: true,
-          money: data.finalState[myPlayer.name === data.finalState.p1Name ? 'p1MoneyAfter' : 'p2MoneyAfter']
-        });
-      }
-      showStatus("Game Over!");
-      document.getElementById("replaySection").style.display = "block";
-      
-      // Handle rating changes
-      if (data.ratingChanges) {
-        lastRatingChanges = data.ratingChanges;
-        const winner = data.ratingChanges.winner;
-        const loser = data.ratingChanges.loser;
-        
-        // Show rating changes in status
-        showStatus(`🏆 ${winner.name} wins!`);
-        showStatus(`Rating changes:`);
-        showStatus(`${winner.name}: +${winner.ratingChange} (${Math.round(winner.newRating)})`);
-        showStatus(`${loser.name}: ${loser.ratingChange} (${Math.round(loser.newRating)})`);
-
-        // Always show winner popup, even in AI vs AI mode
-        showWinnerPopup(winner.name);
-      }
-      
-      // If there's a disconnect field, show that
-      if (data.disconnect) {
-        showStatus(`Player [${data.disconnect}] disconnected. Game ended.`);
-      }
-      break;
-
-    // Bid error
-    case "BID_ERROR":
-      showStatus(`Error: ${data.message}`);
-      break;
-
-    case "LEADERBOARD_UPDATE":
-      updateLeaderboardDisplay(data.leaderboard);
-      break;
-
-    // Add to handleServerMessage switch statement
-    case "REQUEST_AI_BIDS":
-      // Handle AI bid requests
-      if (data.p1Name === AI_NAMES.CLAUDE) {
-        console.log("Sending Claude's bid...");
-        const claudeBid = Math.floor(Math.random() * 50) + 1;
-        ws.send(JSON.stringify({
-          type: "SUBMIT_BID",
-          playerName: AI_NAMES.CLAUDE,
-          bid: claudeBid
-        }));
-      }
-      if (data.p2Name === AI_NAMES.GPT4) {
-        console.log("Sending GPT4's bid...");
-        const gpt4Bid = Math.floor(Math.random() * 50) + 1;
-        ws.send(JSON.stringify({
-          type: "SUBMIT_BID",
-          playerName: AI_NAMES.GPT4,
-          bid: gpt4Bid
-        }));
-      }
+    case 'LEADERBOARD_UPDATE':
+      updateLeaderboard(data.leaderboard);
       break;
 
     default:
-      console.log("Unknown message:", data);
+      console.warn('Unknown message type:', data);
       break;
   }
 }
 
-// Update player statistics
-function updatePlayerStats() {
-  const myStatsDiv = document.getElementById("myStats");
-  if (myStatsDiv && myPlayer) {
-    myStatsDiv.textContent = `Your Money: $${myPlayer.gameState.money} | Last Bid: $${myPlayer.gameState.lastBid || 0}`;
-  }
-}
+function handleLoginSuccess(data) {
+  const isHumanLogin = !data.isAI;
+  
+  if (isHumanLogin) {
+    myPlayer = new Player(data.playerName);
+    myPlayer.updateGameState({
+      money: data.money,
+      turnNumber: 1,
+      maxTurns: MAX_TURNS
+    });
+    
+    loggedIn = true;
+    isAudience = false;
+    showBidsMode = data.showBidsMode;
+    
+    // Update UI
+    document.getElementById("loginPanel").style.display = "none";
+    document.getElementById("audiencePanel").style.display = "none";
+    document.getElementById("gamePanel").style.display = "block";
+    document.getElementById("playerNameSpan").textContent = myPlayer.name;
+    
+    updatePlayerStats();
+    updateTurnDisplay();
+    updateBidInput();
+    
+    showStatus(`Logged in with $${myPlayer.gameState.money}`);
 
-// Update turn display
-function updateTurnDisplay() {
-  const turnDisplay = document.getElementById("turnDisplay");
-  if (turnDisplay && myPlayer) {
-    turnDisplay.textContent = `Turn ${myPlayer.gameState.turnNumber} of ${MAX_TURNS}`;
-  }
-}
-
-// Update bid input field
-function updateBidInput() {
-  const bidInput = document.getElementById("bidInput");
-  if (bidInput && myPlayer) {
-    bidInput.max = myPlayer.gameState.money;
-    const bidLabel = document.querySelector('label[for="bidInput"]');
-    if (bidLabel) {
-      bidLabel.textContent = `Your Bid (max $${myPlayer.gameState.money}): `;
+    // If there's a pending AI login (Human vs AI mode), send it now
+    if (window.pendingAILogin) {
+      console.log("Sending pending AI login...");
+      ws.send(JSON.stringify(window.pendingAILogin));
+      window.pendingAILogin = null;
     }
+  } else {
+    // For AI logins, store the player names
+    if (data.playerName === AI_NAMES.CLAUDE) {
+      p1Name = data.playerName;
+    } else if (data.playerName === AI_NAMES.GPT4) {
+      p2Name = data.playerName;
+    }
+    // Redraw the canvas to show updated names
+    drawBaseline(scotchPosition);
+  }
+  
+  // Handle checkbox state
+  const showBidsCheck = document.getElementById("showBidsCheck");
+  if (!data.isFirstPlayer) {
+    showBidsCheck.disabled = true;
+    showBidsCheck.checked = showBidsMode;
+    showBidsCheck.parentElement.style.opacity = "0.5";
+    showBidsCheck.parentElement.title = "Only first player can set this option";
+  }
+}
+
+function handleAudienceJoin() {
+  loggedIn = true;
+  isAudience = true;
+  myPlayer = null; // Explicitly set myPlayer to null for audience members
+  document.getElementById("loginPanel").style.display = "none";
+  document.getElementById("audiencePanel").style.display = "none";
+  document.getElementById("gamePanel").style.display = "block";
+  document.getElementById("playerNameSpan").textContent = "(Audience)";
+  // Hide the bid input UI
+  document.getElementById("bidInput").disabled = true;
+  document.querySelector("#bidInput + button").disabled = true;
+  showStatus("You are an Audience member. You can watch but not bid.");
+}
+
+function handleGameState(data) {
+  if (!isAudience && myPlayer) {
+    myPlayer.updateGameState({
+      turnNumber: data.turnNumber,
+      maxTurns: data.maxTurns,
+      isGameOver: data.gameOver,
+      money: data.money,
+      lastBid: data.lastBid
+    });
+  }
+  scotchPosition = data.scotchPosition || 5;
+  drawBaseline(scotchPosition);
+  showStatus(`Turn ${data.turnNumber}/${data.maxTurns}${data.gameOver ? " - Game Over!" : ""}`);
+}
+
+function handleTurnResolution(data) {
+  console.log("Turn resolved:", data);
+  if (!isAudience && myPlayer) {
+    myPlayer.updateGameState({
+      turnNumber: data.turnNumber,
+      maxTurns: data.maxTurns,
+      money: data.money,
+      lastBid: data.lastBid
+    });
+  }
+  const oldPos = scotchPosition;
+  scotchPosition = data.scotchPosition;
+  
+  // Update turn display
+  const turnDisplay = document.getElementById("turnDisplay");
+  if (turnDisplay) {
+    turnDisplay.textContent = `Turn ${data.turnNumber} of ${data.maxTurns}`;
+  }
+
+  // Show turn result in status
+  const winnerName = data.winner === 1 ? p1Name : p2Name;
+  if (data.tieUsed) {
+    showStatus(`Tie! ${winnerName} won due to advantage`);
+  } else {
+    showStatus(`${winnerName} won the turn!`);
+  }
+
+  // Show bid information if enabled
+  if (showBidsMode) {
+    showStatus(`${p1Name} bid: $${data.p1Bid}, ${p2Name} bid: $${data.p2Bid}`);
+  }
+  
+  animateScotchMove(oldPos, scotchPosition, () => {
+    if (data.gameOver && !isAudience && myPlayer) {
+      myPlayer.updateGameState({
+        isGameOver: true,
+        money: data.money,
+        lastBid: data.lastBid
+      });
+    }
+  });
+}
+
+function handlePlayerUpdate(data) {
+  if (myPlayer && !isAudience) {
+    myPlayer.updateGameState({
+      money: data.money,
+      lastBid: data.lastBid
+    });
+    updatePlayerStats();
+    updateBidInput();
+  }
+}
+
+function handleBidStatus(data) {
+  console.log("Bid status:", data);
+  const p1Status = data.p1Submitted ? "✓" : "❌";
+  const p2Status = data.p2Submitted ? "✓" : "❌";
+  
+  // Update player names if provided, using defaults if undefined
+  p1Name = data.p1Name || "Player 1";
+  p2Name = data.p2Name || "Player 2";
+  
+  // Only show status for the current player and their opponent
+  if (isAudience) {
+    // Only show turn number if available
+    const turnInfo = data.turnNumber ? ` - Turn ${data.turnNumber}/${MAX_TURNS}` : '';
+    showStatus(`${p1Name} vs ${p2Name}${turnInfo}`);
+    showStatus(`${p1Status} ${p1Name} ${data.p1Submitted ? "has submitted" : "waiting"} | ${p2Status} ${p2Name} ${data.p2Submitted ? "has submitted" : "waiting"}`);
+  } else if (myPlayer && myPlayer.name === p1Name) {
+    showStatus(`${p1Status} You have ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} ${p2Name} has ${data.p2Submitted ? "" : "NOT "}submitted`);
+  } else if (myPlayer && myPlayer.name === p2Name) {
+    showStatus(`${p1Status} ${p1Name} has ${data.p1Submitted ? "" : "NOT "}submitted | ${p2Status} You have ${data.p2Submitted ? "" : "NOT "}submitted`);
+  }
+
+  // Redraw canvas to show updated names
+  drawBaseline(scotchPosition);
+}
+
+function handleGameOver(data) {
+  finalTurnHistory = data.turnHistory;
+  if (!isAudience && myPlayer) {
+    myPlayer.updateGameState({
+      finalState: data.finalState,
+      isGameOver: true,
+      money: data.finalState[myPlayer.name === data.finalState.p1Name ? 'p1MoneyAfter' : 'p2MoneyAfter']
+    });
+  }
+  showStatus("Game Over!");
+  document.getElementById("replaySection").style.display = "block";
+  
+  // Handle rating changes
+  if (data.ratingChanges) {
+    lastRatingChanges = data.ratingChanges;
+    const winner = data.ratingChanges.winner;
+    const loser = data.ratingChanges.loser;
+    
+    // Show rating changes in status
+    showStatus(`🏆 ${winner.name} wins!`);
+    showStatus(`Rating changes:`);
+    showStatus(`${winner.name}: +${winner.ratingChange} (${Math.round(winner.newRating)})`);
+    showStatus(`${loser.name}: ${loser.ratingChange} (${Math.round(loser.newRating)})`);
+
+    // Always show winner popup, even in AI vs AI mode
+    showWinnerPopup(winner.name);
+  }
+  
+  // If there's a disconnect field, show that
+  if (data.disconnect) {
+    showStatus(`Player [${data.disconnect}] disconnected. Game ended.`);
   }
 }
 
@@ -569,106 +533,93 @@ function updateBidInput() {
 //////////////////////////////////////////////////
 // Login as player
 function loginAsPlayer() {
-  const name = document.getElementById("nameInput").value.trim();
-  const pass = document.getElementById("passInput").value.trim();
-  const showBidsCheck = document.getElementById("showBidsCheck");
-  const gameMode = document.querySelector('input[name="gameMode"]:checked').value;
-  
-  document.getElementById("loginError").textContent = "";
-  
-  if (!name || !pass) {
-    document.getElementById("loginError").textContent = "Enter name + passcode.";
-    return;
-  }
-  
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    document.getElementById("loginError").textContent = "Connection not ready. Please try again in a moment.";
-    return;
-  }
-
-  // Handle different game modes
-  switch (gameMode) {
-    case 'ai_vs_ai':
-      // AI vs AI mode
-      console.log("Starting AI vs AI match...");
-      
-      // First AI login (Claude)
-      ws.send(JSON.stringify({
-        type: "LOGIN",
-        playerName: AI_NAMES.CLAUDE,
-        passcode: pass,
+    const nameInput = document.getElementById("nameInput");
+    const passInput = document.getElementById("passInput");
+    const showBidsCheck = document.getElementById("showBidsCheck");
+    const gameModeRadios = document.getElementsByName("gameMode");
+    let selectedMode = 'human';
+    
+    for (const radio of gameModeRadios) {
+        if (radio.checked) {
+            selectedMode = radio.value;
+            break;
+        }
+    }
+    
+    if (!nameInput.value) {
+        showError('Please enter your name');
+        return;
+    }
+    
+    if (selectedMode === 'ai_vs_ai') {
+        handleAIvsAILogin();
+        return;
+    }
+    
+    const isAI = false;
+    const aiType = null;
+    const isFirstPlayer = !window.waitingPlayer;
+    
+    const loginMessage = {
+        type: 'LOGIN',
+        playerName: nameInput.value,
+        passcode: passInput.value,
         showBids: showBidsCheck.checked,
+        isAI,
+        aiType,
+        isFirstPlayer
+    };
+    
+    ws.send(JSON.stringify(loginMessage));
+}
+
+function handleAIvsAILogin() {
+    console.log('Starting AI vs AI match');
+    // First AI player login
+    ws.send(JSON.stringify({
+        type: 'LOGIN',
+        playerName: 'Claude',
+        passcode: 'ai_match',
+        showBids: true,
         isAI: true,
         aiType: 'claude',
         isFirstPlayer: true
-      }));
-
-      // Second AI login after delay
-      setTimeout(() => {
+    }));
+    
+    // Second AI player login after a short delay
+    setTimeout(() => {
         ws.send(JSON.stringify({
-          type: "LOGIN",
-          playerName: AI_NAMES.GPT4,
-          passcode: pass,
-          isAI: true,
-          aiType: 'openai',
-          isFirstPlayer: false
+            type: 'LOGIN',
+            playerName: 'GPT-4',
+            passcode: 'ai_match',
+            showBids: true,
+            isAI: true,
+            aiType: 'openai',
+            isFirstPlayer: false
         }));
-
-        // Start game after both AIs are logged in
+        
+        // Start the game after both AIs have joined
         setTimeout(() => {
-          ws.send(JSON.stringify({ 
-            type: "START_GAME",
-            playerName: AI_NAMES.CLAUDE
-          }));
-          
-          // Join as audience
-          setTimeout(joinAsAudience, 500);
-        }, 500);
-      }, 1000);
-      break;
-
-    case 'human':
-      // Human vs Human mode
-      console.log("Starting Human vs Human match...");
-      ws.send(JSON.stringify({
-        type: "LOGIN",
-        playerName: name,
-        passcode: pass,
-        showBids: showBidsCheck.checked,
-        isAI: false,
-        isFirstPlayer: true
-      }));
-      break;
-
-    default:
-      // Human vs AI mode
-      console.log("Starting Human vs AI match...");
-      // Send human login first
-      ws.send(JSON.stringify({
-        type: "LOGIN",
-        playerName: name,
-        passcode: pass,
-        showBids: showBidsCheck.checked,
-        isAI: false,
-        isFirstPlayer: true
-      }));
-
-      // Store AI login to be sent after human login success
-      window.pendingAILogin = {
-        type: "LOGIN",
-        playerName: gameMode === 'claude' ? AI_NAMES.CLAUDE : AI_NAMES.GPT4,
-        passcode: pass,
-        isAI: true,
-        aiType: gameMode === 'claude' ? 'claude' : 'openai',
-        isFirstPlayer: false
-      };
-      break;
-  }
+            ws.send(JSON.stringify({
+                type: 'START_GAME',
+                playerName: 'Claude'
+            }));
+            
+            // Join as audience to watch
+            setTimeout(() => {
+                ws.send(JSON.stringify({
+                    type: 'AUDIENCE_JOIN'
+                }));
+            }, 500);
+        }, 1000);
+    }, 1000);
 }
 
 // Join as audience
 function joinAsAudience() {
-  ws.send(JSON.stringify({ type: "AUDIENCE_JOIN" }));
+    ws.send(JSON.stringify({
+        type: 'AUDIENCE_JOIN'
+    }));
 }
 
 //////////////////////////////////////////////////
@@ -726,27 +677,23 @@ function setupBidFieldMask() {
 
 // Submit bid to server
 function submitBid() {
-  if (!loggedIn || isAudience || !myPlayer) return;
-  
-  const bidInt = parseInt(realBidValue || "0", 10);
-  
-  try {
-    myPlayer.submitBid(bidInt);
+    const bidInput = document.getElementById("bidInput");
+    const bid = parseInt(bidInput.value);
     
-    ws.send(
-      JSON.stringify({
-        type: "SUBMIT_BID",
-        playerName: myPlayer.name,
-        bid: bidInt
-      })
-    );
+    if (isNaN(bid) || bid < 0 || bid > gameState.myMoney) {
+        showError(`Please enter a valid bid between 0 and ${gameState.myMoney}`);
+        return;
+    }
     
-    showStatus(`Bid submitted: $${bidInt}`);
-    realBidValue = "";
-    document.getElementById("bidInput").value = "";
-  } catch (error) {
-    showStatus(`Error: ${error.message}`);
-  }
+    ws.send(JSON.stringify({
+        type: 'SUBMIT_BID',
+        playerName: gameState.playerName,
+        bid: bid
+    }));
+    
+    bidInput.value = '';
+    bidInput.disabled = true;
+    document.querySelector('button[onclick="submitBid()"]').disabled = true;
 }
 
 //////////////////////////////////////////////////

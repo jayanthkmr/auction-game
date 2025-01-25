@@ -1,53 +1,50 @@
-const WebSocket = require('ws');
 const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
 const path = require('path');
-const GameManager = require('./server/gameManager');
-const MessageHandler = require('./server/messageHandler');
+const { GameManager } = require('./server/gameManager');
+const { MessageHandler } = require('./server/messageHandler');
 const { LeaderboardManager } = require('./server/services/LeaderboardManager');
 require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT || 3000;
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
 
 // Serve static files from public directory
 app.use(express.static('public'));
 
-// Create HTTP server
-const server = app.listen(port, () => {
-  console.log(`Server listening on http://localhost:${port}`);
-});
-
-// Create WebSocket server
-const wss = new WebSocket.Server({ server });
-
-// Create game manager and leaderboard
+// Create managers
 const leaderboard = new LeaderboardManager();
 const gameManager = new GameManager(wss, leaderboard);
+const messageHandler = new MessageHandler(wss, gameManager, leaderboard);
 
-// Create message handler
-const messageHandler = new MessageHandler(gameManager, wss);
-
-// Handle WebSocket connections
+// WebSocket connection handling
 wss.on('connection', (ws) => {
-  console.log('New WebSocket connection established.');
+    console.log('New client connected');
+    
+    ws.on('message', (message) => {
+        try {
+            messageHandler.handleMessage(ws, message);
+        } catch (error) {
+            console.error('Error handling message:', error);
+            ws.send(JSON.stringify({
+                type: 'error',
+                error: error.message
+            }));
+        }
+    });
+    
+    ws.on('close', () => {
+        console.log('Client disconnected');
+        gameManager.handleDisconnect(ws);
+    });
+});
 
-  ws.on('message', async (data) => {
-    try {
-      const message = JSON.parse(data);
-      await messageHandler.handleMessage(ws, message);
-    } catch (error) {
-      console.error('Error processing message:', error);
-      ws.send(JSON.stringify({
-        type: 'ERROR',
-        message: 'Internal server error'
-      }));
-    }
-  });
-
-  ws.on('close', () => {
-    console.log('Client disconnected');
-    gameManager.handleDisconnect(ws);
-  });
+// Start server
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`Server is listening on http://localhost:${PORT}`);
 });
 
 // Export for testing

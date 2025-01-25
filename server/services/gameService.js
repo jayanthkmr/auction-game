@@ -1,19 +1,141 @@
-const { sendMessage, broadcastAll, broadcastBidStatus } = require('../utils/websocket');
+const { broadcastAll } = require('../utils/websocket');
+const OpenAI = require('openai');
+const { Claude } = require('@anthropic-ai/sdk');
+
+// Initialize AI clients
+let openai;
+let claude;
+
+try {
+    if (process.env.OPENAI_API_KEY) {
+        openai = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY
+        });
+    }
+    
+    if (process.env.ANTHROPIC_API_KEY) {
+        claude = new Claude({
+            apiKey: process.env.ANTHROPIC_API_KEY
+        });
+    }
+} catch (error) {
+    console.warn('Failed to initialize AI clients:', error);
+}
 
 async function handleAIBid(game, player) {
-  if (!player.isAI) return;
+    try {
+        let bid = 0;
 
-  try {
-    const bid = await player.decideBid(game);
-    player.submitBid(bid);
-    broadcastBidStatus(game.wss, game);
-  } catch (error) {
-    console.error(`Error getting AI bid: ${error}`);
-    // Use fallback strategy
-    const fallbackBid = Math.floor(Math.random() * (player.money + 1));
-    player.submitBid(fallbackBid);
-    broadcastBidStatus(game.wss, game);
-  }
+        if (player.aiType === 'openai' && openai) {
+            bid = await getGPT4Bid(game, player);
+        } else if (player.aiType === 'claude' && claude) {
+            bid = await getClaudeBid(game, player);
+        } else {
+            // Fallback to simple strategy
+            bid = getSimpleAIBid(game, player);
+        }
+
+        // Place the bid
+        if (typeof game.placeBid === 'function') {
+            game.placeBid(player, bid);
+        } else if (player.submitBid) {
+            player.submitBid(bid);
+        }
+        
+        return bid;
+    } catch (error) {
+        console.error('Error in AI bid:', error);
+        // Fallback to simple strategy on error
+        const bid = getSimpleAIBid(game, player);
+        if (typeof game.placeBid === 'function') {
+            game.placeBid(player, bid);
+        } else if (player.submitBid) {
+            player.submitBid(bid);
+        }
+        return bid;
+    }
+}
+
+function getSimpleAIBid(game, player) {
+    const { money } = player;
+    const { bottlePosition, currentTurn, maxTurns } = game;
+    
+    // Calculate how far we are from our goal
+    const isPlayer1 = game.players[0] === player;
+    const goal = isPlayer1 ? 0 : 10;
+    const distanceToGoal = Math.abs(bottlePosition - goal);
+    
+    // Calculate turns remaining
+    const turnsLeft = maxTurns - currentTurn + 1;
+    
+    // If we can win in the remaining turns, bid more aggressively
+    if (distanceToGoal <= turnsLeft) {
+        return Math.min(money, Math.floor(money * 0.4));
+    }
+    
+    // Otherwise bid conservatively
+    return Math.min(money, Math.floor(money * 0.2));
+}
+
+async function getGPT4Bid(game, player) {
+    try {
+        const prompt = createBidPrompt(game, player);
+        
+        const response = await openai.chat.completions.create({
+            model: "gpt-4",
+            messages: [{
+                role: "system",
+                content: "You are an AI playing a scotch auction game. Your goal is to determine the optimal bid amount."
+            }, {
+                role: "user",
+                content: prompt
+            }],
+            temperature: 0.7,
+            max_tokens: 50
+        });
+
+        const bidText = response.choices[0].message.content;
+        const bid = parseInt(bidText.match(/\d+/)[0]);
+        return Math.min(bid, player.money);
+    } catch (error) {
+        console.error('Error getting GPT-4 bid:', error);
+        return getSimpleAIBid(game, player);
+    }
+}
+
+async function getClaudeBid(game, player) {
+    try {
+        const prompt = createBidPrompt(game, player);
+        
+        const response = await claude.complete({
+            prompt: `\n\nHuman: ${prompt}\n\nAssistant: Let me analyze the game state and determine the optimal bid. Based on the current position, money available, and turns remaining, I recommend bidding`,
+            max_tokens: 50,
+            temperature: 0.7
+        });
+
+        const bidText = response.completion;
+        const bid = parseInt(bidText.match(/\d+/)[0]);
+        return Math.min(bid, player.money);
+    } catch (error) {
+        console.error('Error getting Claude bid:', error);
+        return getSimpleAIBid(game, player);
+    }
+}
+
+function createBidPrompt(game, player) {
+    const isPlayer1 = game.players[0] === player;
+    const goal = isPlayer1 ? 0 : 10;
+    
+    return `
+Current game state:
+- You are Player ${isPlayer1 ? '1' : '2'}
+- Your goal is position ${goal}
+- Bottle is at position ${game.bottlePosition}
+- You have $${player.money}
+- Current turn: ${game.currentTurn}/${game.maxTurns}
+- Your bid history: ${player.bidHistory.join(', ')}
+
+What amount should you bid? Respond with just a number.`;
 }
 
 async function resolveTurn(game) {
