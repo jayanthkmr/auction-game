@@ -1,13 +1,15 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Scotch Auction Game</title>
 
-  <!-- Updated font import -->
+  <!-- Import fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Roboto:wght@400;700&display=swap" rel="stylesheet">
   
   <style>
+    /* Global styles */
     * {
       box-sizing: border-box;
       margin: 0;
@@ -282,12 +284,67 @@
   </style>
 </head>
 <body>
+  <!-- Main content -->
+  <header>
+    <h1>Scotch Auction Game</h1>
+  </header>
 
-<h1>🥃 Scotch Auction Game</h1>
+  <main>
+    <!-- Game interface goes here -->
+    <div id="turnDisplay">Turn 1 of 5</div>
 
-<!-- Add turn display -->
-<div id="turnDisplay">Turn 1 of 5</div>
+    <!-- Game Rules Panel -->
+    <div id="rulesPanel" class="panel">
+      <h3>📜 Game Rules</h3>
+      <div class="rules-grid">
+        <div class="rule-card">
+          <h4>🎮 Basic Setup</h4>
+          <ul>
+            <li>2 players compete</li>
+            <li>Each starts with $100</li>
+            <li>Bottle starts in middle (position 5)</li>
+          </ul>
+        </div>
+        <div class="rule-card">
+          <h4>💰 Bidding</h4>
+          <ul>
+            <li>Players bid secretly each turn</li>
+            <li>Higher bid wins the turn</li>
+            <li>Winner pays their bid</li>
+            <li>Loser keeps their money</li>
+          </ul>
+        </div>
+        <div class="rule-card">
+          <h4>🎯 Movement</h4>
+          <ul>
+            <li>Winner moves bottle 1 step their way</li>
+            <li>Player 1 moves left (0)</li>
+            <li>Player 2 moves right (10)</li>
+          </ul>
+        </div>
+        <div class="rule-card">
+          <h4>🏆 Winning</h4>
+          <ul>
+            <li>Get bottle to your end (0 or 10)</li>
+            <li>Or have most progress after 5 turns</li>
+            <li>Ties use alternating advantage</li>
+          </ul>
+        </div>
+      </div>
+    </div>
 
+    <!-- Rest of your existing HTML structure -->
+    <div id="loginPanel" class="panel">
+      <h3>�� Login as Player</h3>
+      <label>Player Name:
+        <input id="nameInput" type="text" placeholder="Enter your name" />
+      </label>
+      <label>Game Passcode:
+        <input id="passInput" type="password" placeholder="Enter passcode" />
+      </label>
+      <div style="margin: 15px 0;">
+        <h4>🎮 Game Mode</h4>
+        <div style="margin: 10px 0;">
 <!-- Game Rules Panel -->
 <div id="rulesPanel" class="panel">
   <h3>📜 Game Rules</h3>

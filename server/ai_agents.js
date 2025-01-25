@@ -1,8 +1,9 @@
 const OpenAI = require('openai');
-const Anthropic = require('@anthropic-ai/sdk');
-const Player = require('./public/player.js');
+const { Anthropic } = require('@anthropic-ai/sdk');
+const Player = require('../public/player.js');
 require('dotenv').config();
 
+// Initialize API clients
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
@@ -51,17 +52,26 @@ class AIPlayer extends Player {
       if (this.type === 'openai') {
         const response = await openai.chat.completions.create({
           model: "gpt-4",
-          messages: [{ role: "user", content: context }],
+          messages: [{ 
+            role: "system",
+            content: "You are an AI playing a scotch auction game. Respond only with a number representing your bid."
+          }, {
+            role: "user",
+            content: context
+          }],
           temperature: 0.7,
           max_tokens: 10
         });
         bid = parseInt(response.choices[0].message.content.trim());
       } else {
         const response = await anthropic.messages.create({
-          model: "claude-3-sonnet-20240229",
-          max_tokens: 10,
+          model: 'claude-3-sonnet-20240229',
+          messages: [{
+            role: 'user',
+            content: context
+          }],
           temperature: 0.7,
-          messages: [{ role: "user", content: context }]
+          max_tokens: 10
         });
         bid = parseInt(response.content[0].text.trim());
       }

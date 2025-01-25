@@ -13,6 +13,7 @@
 // Player class is loaded globally from player.js
 /* global Player */
 
+// Initialize WebSocket and player state
 let ws;
 let myPlayer = null;
 let loggedIn = false;
@@ -65,6 +66,7 @@ scotchImg.onload = () => {
   drawBaseline(scotchPosition);
 };
 
+// Draw baseline on canvas
 function drawBaseline(pos) {
   // Make sure canvas is visible
   if (canvas.style.display === 'none') {
@@ -150,11 +152,13 @@ function drawBaseline(pos) {
   drawScotch(pos);
 }
 
+// Convert position to X coordinate
 function posToX(pos) {
   // 0..10 => 50..550
   return 50 + 500 * (pos / 10);
 }
 
+// Draw scotch image on canvas
 function drawScotch(pos) {
   if (!scotchImg.complete) {
     // If image isn't loaded yet, retry in a moment
@@ -174,6 +178,7 @@ function drawScotch(pos) {
   }
 }
 
+// Animate scotch movement
 function animateScotchMove(oldPos, newPos, onComplete) {
   if (oldPos === newPos) {
     if (onComplete) onComplete();
@@ -233,9 +238,7 @@ window.addEventListener("load", () => {
   }
 });
 
-//////////////////////////////////////////////////
-// Connect WebSocket
-//////////////////////////////////////////////////
+// Connect to WebSocket server
 function connectWebSocket() {
   if (ws) {
     ws.close();
@@ -279,6 +282,7 @@ function connectWebSocket() {
   };
 }
 
+// Handle messages from server
 function handleServerMessage(data) {
   switch (data.type) {
     // Player login error
@@ -313,6 +317,13 @@ function handleServerMessage(data) {
         updateBidInput();
         
         showStatus(`Logged in with $${myPlayer.gameState.money}`);
+
+        // If there's a pending AI login (Human vs AI mode), send it now
+        if (window.pendingAILogin) {
+          console.log("Sending pending AI login...");
+          ws.send(JSON.stringify(window.pendingAILogin));
+          window.pendingAILogin = null;
+        }
       } else {
         // For AI logins, store the player names
         if (data.playerName === AI_NAMES.CLAUDE) {
@@ -323,7 +334,6 @@ function handleServerMessage(data) {
         // Redraw the canvas to show updated names
         drawBaseline(scotchPosition);
       }
-      console.log("Login success:", { myPlayerName: myPlayer.name, p1Name, p2Name, gameState: myPlayer.gameState });
       
       // Handle checkbox state
       const showBidsCheck = document.getElementById("showBidsCheck");
@@ -339,6 +349,7 @@ function handleServerMessage(data) {
     case "AUDIENCE_OK":
       loggedIn = true;
       isAudience = true;
+      myPlayer = null; // Explicitly set myPlayer to null for audience members
       document.getElementById("loginPanel").style.display = "none";
       document.getElementById("audiencePanel").style.display = "none";
       document.getElementById("gamePanel").style.display = "block";
@@ -351,7 +362,7 @@ function handleServerMessage(data) {
 
     // A partial game state for new audience
     case "GAME_STATE":
-      if (!isAudience) {
+      if (!isAudience && myPlayer) {
         myPlayer.updateGameState({
           turnNumber: data.turnNumber,
           maxTurns: data.maxTurns,
@@ -496,12 +507,36 @@ function handleServerMessage(data) {
       updateLeaderboardDisplay(data.leaderboard);
       break;
 
+    // Add to handleServerMessage switch statement
+    case "REQUEST_AI_BIDS":
+      // Handle AI bid requests
+      if (data.p1Name === AI_NAMES.CLAUDE) {
+        console.log("Sending Claude's bid...");
+        const claudeBid = Math.floor(Math.random() * 50) + 1;
+        ws.send(JSON.stringify({
+          type: "SUBMIT_BID",
+          playerName: AI_NAMES.CLAUDE,
+          bid: claudeBid
+        }));
+      }
+      if (data.p2Name === AI_NAMES.GPT4) {
+        console.log("Sending GPT4's bid...");
+        const gpt4Bid = Math.floor(Math.random() * 50) + 1;
+        ws.send(JSON.stringify({
+          type: "SUBMIT_BID",
+          playerName: AI_NAMES.GPT4,
+          bid: gpt4Bid
+        }));
+      }
+      break;
+
     default:
       console.log("Unknown message:", data);
       break;
   }
 }
 
+// Update player statistics
 function updatePlayerStats() {
   const myStatsDiv = document.getElementById("myStats");
   if (myStatsDiv && myPlayer) {
@@ -509,6 +544,7 @@ function updatePlayerStats() {
   }
 }
 
+// Update turn display
 function updateTurnDisplay() {
   const turnDisplay = document.getElementById("turnDisplay");
   if (turnDisplay && myPlayer) {
@@ -516,6 +552,7 @@ function updateTurnDisplay() {
   }
 }
 
+// Update bid input field
 function updateBidInput() {
   const bidInput = document.getElementById("bidInput");
   if (bidInput && myPlayer) {
@@ -530,6 +567,7 @@ function updateBidInput() {
 //////////////////////////////////////////////////
 // UI for login
 //////////////////////////////////////////////////
+// Login as player
 function loginAsPlayer() {
   const name = document.getElementById("nameInput").value.trim();
   const pass = document.getElementById("passInput").value.trim();
@@ -548,61 +586,87 @@ function loginAsPlayer() {
     return;
   }
 
-  // Handle AI vs AI match
-  if (gameMode === 'ai_vs_ai') {
-    ws.send(JSON.stringify({
-      type: "LOGIN",
-      playerName: AI_NAMES.CLAUDE,
-      passcode: pass,
-      showBids: showBidsCheck.checked,
-      isAI: true,
-      aiType: 'claude'
-    }));
-
-    setTimeout(() => {
+  // Handle different game modes
+  switch (gameMode) {
+    case 'ai_vs_ai':
+      // AI vs AI mode
+      console.log("Starting AI vs AI match...");
+      
+      // First AI login (Claude)
       ws.send(JSON.stringify({
         type: "LOGIN",
-        playerName: AI_NAMES.GPT4,
+        playerName: AI_NAMES.CLAUDE,
+        passcode: pass,
+        showBids: showBidsCheck.checked,
+        isAI: true,
+        aiType: 'claude',
+        isFirstPlayer: true
+      }));
+
+      // Second AI login after delay
+      setTimeout(() => {
+        ws.send(JSON.stringify({
+          type: "LOGIN",
+          playerName: AI_NAMES.GPT4,
+          passcode: pass,
+          isAI: true,
+          aiType: 'openai',
+          isFirstPlayer: false
+        }));
+
+        // Start game after both AIs are logged in
+        setTimeout(() => {
+          ws.send(JSON.stringify({ 
+            type: "START_GAME",
+            playerName: AI_NAMES.CLAUDE
+          }));
+          
+          // Join as audience
+          setTimeout(joinAsAudience, 500);
+        }, 500);
+      }, 1000);
+      break;
+
+    case 'human':
+      // Human vs Human mode
+      console.log("Starting Human vs Human match...");
+      ws.send(JSON.stringify({
+        type: "LOGIN",
+        playerName: name,
+        passcode: pass,
+        showBids: showBidsCheck.checked,
+        isAI: false,
+        isFirstPlayer: true
+      }));
+      break;
+
+    default:
+      // Human vs AI mode
+      console.log("Starting Human vs AI match...");
+      // Send human login first
+      ws.send(JSON.stringify({
+        type: "LOGIN",
+        playerName: name,
+        passcode: pass,
+        showBids: showBidsCheck.checked,
+        isAI: false,
+        isFirstPlayer: true
+      }));
+
+      // Store AI login to be sent after human login success
+      window.pendingAILogin = {
+        type: "LOGIN",
+        playerName: gameMode === 'claude' ? AI_NAMES.CLAUDE : AI_NAMES.GPT4,
         passcode: pass,
         isAI: true,
-        aiType: 'openai'
-      }));
-    }, 500);
-
-    // Join as audience to watch
-    setTimeout(() => {
-      joinAsAudience();
-    }, 1000);
-    
-    return;
-  }
-
-  // For human vs AI or human vs human, always log in human first
-  const humanLogin = {
-    type: "LOGIN",
-    playerName: name,
-    passcode: pass,
-    showBids: showBidsCheck.checked,
-    isAI: false,
-    isFirstPlayer: true
-  };
-
-  // Send human login first
-  ws.send(JSON.stringify(humanLogin));
-
-  // If playing against AI, log in AI after human login success
-  if (gameMode !== 'human') {
-    // Store AI login details to be sent after human login success
-    window.pendingAILogin = {
-      type: "LOGIN",
-      playerName: gameMode === 'claude' ? AI_NAMES.CLAUDE : AI_NAMES.GPT4,
-      passcode: pass,
-      isAI: true,
-      aiType: gameMode === 'claude' ? 'claude' : 'openai'
-    };
+        aiType: gameMode === 'claude' ? 'claude' : 'openai',
+        isFirstPlayer: false
+      };
+      break;
   }
 }
 
+// Join as audience
 function joinAsAudience() {
   ws.send(JSON.stringify({ type: "AUDIENCE_JOIN" }));
 }
@@ -610,6 +674,7 @@ function joinAsAudience() {
 //////////////////////////////////////////////////
 // Bidding
 //////////////////////////////////////////////////
+// Setup bid field mask
 function setupBidFieldMask() {
   const bidInput = document.getElementById("bidInput");
   const bidLabel = document.querySelector('label[for="bidInput"]') || bidInput.previousElementSibling;
@@ -619,10 +684,17 @@ function setupBidFieldMask() {
 
   // Update the label to show max $100 at start or current money during game
   function updateBidLabel() {
+    if (!myPlayer || !myPlayer.gameState) {
+      bidLabel.textContent = `Your Bid (max $100): `;
+      bidInput.max = 100;
+      return;
+    }
     const maxBid = myPlayer.gameState.money;
     bidLabel.textContent = `Your Bid (max $${maxBid}): `;
     bidInput.max = maxBid;
   }
+  
+  // Initial update
   updateBidLabel();
 
   bidInput.addEventListener("input", (e) => {
@@ -631,11 +703,11 @@ function setupBidFieldMask() {
     const numericVal = newVal.replace(/[^0-9]/g, '');
     
     if (numericVal.length > 0) {
-      const maxBid = myPlayer.gameState.money;
+      const maxBid = myPlayer?.gameState?.money || 100;
       const validatedBid = Math.min(parseInt(numericVal), maxBid);
       realBidValue = validatedBid.toString();
       e.target.value = validatedBid.toString();
-      console.log("Bid input:", { value: validatedBid, maxBid, money: myPlayer.gameState.money });
+      console.log("Bid input:", { value: validatedBid, maxBid, money: myPlayer?.gameState?.money });
     } else {
       realBidValue = "";
       e.target.value = "";
@@ -652,6 +724,7 @@ function setupBidFieldMask() {
   return updateBidLabel;
 }
 
+// Submit bid to server
 function submitBid() {
   if (!loggedIn || isAudience || !myPlayer) return;
   
@@ -679,6 +752,7 @@ function submitBid() {
 //////////////////////////////////////////////////
 // Show status text
 //////////////////////////////////////////////////
+// Show status message
 function showStatus(msg) {
   const s = document.getElementById("statusArea");
   // Limit to last 5 messages and auto-scroll
@@ -695,6 +769,7 @@ function showStatus(msg) {
 // Replay
 //////////////////////////////////////////////////
 let replayIndex = 0;
+// Start replay of game
 function startReplay() {
   const rm = document.getElementById("replayMessages");
   if (!finalTurnHistory) {
@@ -706,6 +781,7 @@ function startReplay() {
   replayNextTurn();
 }
 
+// Replay next turn
 function replayNextTurn() {
   const rm = document.getElementById("replayMessages");
   if (replayIndex >= finalTurnHistory.length) {
@@ -758,7 +834,7 @@ function replayNextTurn() {
   rm.scrollTop = rm.scrollHeight;
 }
 
-// Add this function for the winner popup
+// Show winner popup
 function showWinnerPopup(winnerName) {
   // Create popup elements
   const popup = document.createElement('div');
@@ -830,7 +906,7 @@ function showWinnerPopup(winnerName) {
   }, 5000);
 }
 
-// Update leaderboard display function
+// Update leaderboard display
 function updateLeaderboardDisplay(leaderboard) {
   const tbody = document.querySelector("#leaderboardTable tbody");
   if (!tbody) return; // Guard against missing table
@@ -905,7 +981,7 @@ function updateLeaderboardDisplay(leaderboard) {
   });
 }
 
-// Add this function to request leaderboard data
+// Request leaderboard from server
 function requestLeaderboard() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "REQUEST_LEADERBOARD" }));

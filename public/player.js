@@ -1,10 +1,18 @@
 // Player class definition for both browser and Node.js environments
 (function(global) {
   class Player {
-    constructor(name, isAI = false, aiType = null) {
+    constructor(name, isAI = false, aiType = null, ws = null, showBids = false, isFirstPlayer = false) {
       this.name = name;
       this.isAI = isAI;
       this.aiType = aiType; // 'openai', 'claude', or null
+      this.ws = ws;
+      this.showBids = showBids;
+      this.isFirstPlayer = isFirstPlayer;
+      this.money = 100; // Starting money
+      this.currentBid = null;
+      this.lastBid = null;
+      this.bidSubmitted = false;
+      this.rating = 1500; // Starting ELO rating
       this.gameState = {
         money: 100,
         lastBid: 0,
@@ -15,54 +23,49 @@
       };
     }
   
-    // Game state management
+    // Retrieve current game state
     getGameState() {
       return {
         ...this.gameState,
         name: this.name,
         isAI: this.isAI,
-        aiType: this.aiType
+        aiType: this.aiType,
+        money: this.money,
+        rating: this.rating,
+        bidSubmitted: this.bidSubmitted
       };
     }
   
+    // Update game state with new data
     updateGameState(newState) {
       this.gameState = { ...this.gameState, ...newState };
     }
   
-    // Bid management
-    submitBid(bid) {
-      if (bid < 0 || bid > this.gameState.money) {
-        throw new Error(`Invalid bid amount. Maximum bid is $${this.gameState.money}`);
-      }
-      this.gameState.lastBid = bid;
-      this.gameState.hasSubmitted = true;
-      return true;
-    }
-  
-    // Money management
-    deductBidAmount() {
-      if (this.gameState.lastBid > this.gameState.money) {
+    // Submit a bid for the current turn
+    submitBid(amount) {
+      if (amount > this.money) {
         throw new Error('Insufficient funds');
       }
+      this.currentBid = amount;
+      this.bidSubmitted = true;
+    }
+  
+    // Deduct the bid amount from player's money
+    deductBidAmount() {
       this.gameState.money -= this.gameState.lastBid;
-      return this.gameState.money;
     }
   
-    // History management
+    // Record the turn history
     recordTurnHistory(turnData) {
-      this.gameState.history.push({
-        turnNumber: this.gameState.turnNumber,
-        bid: this.gameState.lastBid,
-        moneyBefore: this.gameState.money + this.gameState.lastBid,
-        moneyAfter: this.gameState.money,
-        position: this.gameState.position,
-        ...turnData
-      });
-      this.gameState.turnNumber++;
+      this.gameState.history.push(turnData);
     }
   
-    // Game reset
+    // Reset player state for a new game
     reset() {
+      this.money = 100;
+      this.currentBid = null;
+      this.lastBid = null;
+      this.bidSubmitted = false;
       this.gameState = {
         money: 100,
         lastBid: 0,
@@ -73,36 +76,51 @@
       };
     }
   
-    // Position management
+    // Update player's position on the board
     updatePosition(newPosition) {
-      if (newPosition < 0 || newPosition > 10) {
-        throw new Error('Invalid position');
-      }
       this.gameState.position = newPosition;
     }
   
-    // Turn management
+    // Prepare player for a new turn
     prepareTurn() {
       this.gameState.hasSubmitted = false;
       this.gameState.lastBid = 0;
     }
   
-    // Utility methods
+    // Get formatted history for display
     getFormattedHistory() {
-      if (this.gameState.history.length === 0) return "No previous turns";
-      return this.gameState.history.map(turn => 
-        `Turn ${turn.turnNumber}: Bid $${turn.bid}, ` +
-        `Money: ${turn.moneyBefore} → ${turn.moneyAfter}, ` +
-        `Position: ${turn.position}`
-      ).join('\n');
+      return this.gameState.history.map(turn => `Turn ${turn.turnNumber}: Bid $${turn.p1Bid} vs $${turn.p2Bid}`).join('\n');
+    }
+  
+    updateMoney(change) {
+      this.money += change;
+      if (this.money < 0) this.money = 0;
+    }
+  
+    updateRating(change) {
+      this.rating += change;
+      if (this.rating < 0) this.rating = 0;
+    }
+  
+    toJSON() {
+      return {
+        name: this.name,
+        isAI: this.isAI,
+        aiType: this.aiType,
+        showBids: this.showBids,
+        isFirstPlayer: this.isFirstPlayer,
+        money: this.money,
+        rating: this.rating,
+        bidSubmitted: this.bidSubmitted
+      };
     }
   }
 
-  // Export for both browser and Node.js
+  // Export Player class
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = Player;
   } else {
     global.Player = Player;
   }
-})(typeof window !== 'undefined' ? window : global);
+})(this);
   
