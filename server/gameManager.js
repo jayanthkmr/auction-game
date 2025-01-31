@@ -8,12 +8,36 @@ class GameManager {
         this.leaderboard = leaderboard;
         this.games = new Map(); // playerName -> game
         this.audiences = new Set();
+        this.activePlayers = new Set(); // Track active players
+        this.currentPasscode = null; // Store current passcode
     }
 
-    handlePlayerJoin(ws, playerName, isAI, aiType, showBids, isFirstPlayer) {
+    handlePlayerJoin(ws, playerName, isAI, aiType, showBids, isFirstPlayer, passcode = null) {
         // Validate inputs
         if (!ws || !playerName) {
             throw new Error('Invalid connection or player name');
+        }
+
+        // Check active players limit (max 2)
+        if (this.activePlayers.size >= 2 && !isAI) {
+            throw new Error('Maximum number of players (2) already reached');
+        }
+
+        // Handle passcode matching
+        if (isFirstPlayer) {
+            // First player must provide a passcode
+            if (!passcode) {
+                throw new Error('First player must set a passcode');
+            }
+            this.currentPasscode = passcode;
+        } else if (!isAI) {
+            // Second player must match the existing passcode
+            if (!this.currentPasscode) {
+                throw new Error('No game available to join');
+            }
+            if (passcode !== this.currentPasscode) {
+                throw new Error('Invalid passcode');
+            }
         }
 
         // Check if player is already in a game
@@ -42,7 +66,8 @@ class GameManager {
                 turnNumber: 1,
                 maxTurns: 5,
                 showBids: showBids,
-                turnHistory: []
+                turnHistory: [],
+                passcode: this.currentPasscode
             };
         }
 
@@ -50,6 +75,9 @@ class GameManager {
         if (game.players.length === 0) {
             game.players.push(player);
             game.showBids = showBids;
+            if (!isAI) {
+                this.activePlayers.add(playerName);
+            }
         } else if (game.players.length === 1) {
             // Don't allow same player to join twice
             if (game.players[0].name === playerName) {
@@ -57,6 +85,9 @@ class GameManager {
             }
             game.players.push(player);
             game.status = 'active'; // Game starts when second player joins
+            if (!isAI) {
+                this.activePlayers.add(playerName);
+            }
         } else {
             throw new Error('Game is full');
         }

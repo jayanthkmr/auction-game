@@ -50,37 +50,37 @@ class MessageHandler {
 
   handleLogin(ws, data) {
     try {
-      const { playerName, passcode, showBids, isAI, aiType, isFirstPlayer } = data;
+      const { playerName, passcode, showBids } = data;
       
-      // Validate input
-      if (!playerName || playerName.length > 20) {
-        throw new Error('Invalid name');
+      if (!playerName) {
+        throw new Error('Player name is required');
       }
 
-      // Create player and start/join game
-      const game = this.gameManager.handlePlayerJoin(ws, playerName, isAI, aiType, showBids, isFirstPlayer);
+      // Determine if this is the first player
+      const isFirstPlayer = this.gameManager.activePlayers.size === 0;
+
+      // Create or join game
+      const game = this.gameManager.handlePlayerJoin(ws, playerName, false, null, showBids, isFirstPlayer, passcode);
       
-      // Send login success response
+      // Send success response with passcode for first player
       ws.send(JSON.stringify({
         type: 'LOGIN_SUCCESS',
         playerName: playerName,
-        money: 100,
-        showBidsMode: showBids,
-        isFirstPlayer: game.players[0].name === playerName,
-        isAI: isAI
+        passcode: passcode, // Send back the same passcode that was provided
+        isFirstPlayer: isFirstPlayer,
+        showBidsMode: game.showBids
       }));
 
-      // If game is ready to start, broadcast state
+      // Broadcast game state to all players
       if (game.status === 'active') {
         this.gameManager.broadcastGameState(game);
-        
-        // Broadcast initial bid status
         this.gameManager.broadcastBidStatus(game);
       }
+
     } catch (error) {
       console.error('Login error:', error);
       ws.send(JSON.stringify({
-        type: 'LOGIN_ERROR',
+        type: 'ERROR',
         message: error.message
       }));
     }

@@ -41,6 +41,9 @@ let showBidsMode = false;
 // Add to your existing state variables at the top
 let lastRatingChanges = null;
 
+// Add to your existing state variables at the top
+let isFirstPlayer = true;
+
 // Add these constants at the top
 const AI_NAMES = {
   CLAUDE: "Claude-AI",
@@ -237,6 +240,9 @@ window.addEventListener("load", () => {
   // In case scotchImg wasn't loaded, we'll still attempt the baseline
   drawBaseline(scotchPosition);
   
+  // Add passcode styles
+  document.head.appendChild(passcodeStyle);
+  
   // Initialize bid field mask
   updateBidLabel = setupBidFieldMask();
   
@@ -351,11 +357,12 @@ function handleLoginSuccess(data) {
   
   if (isHumanLogin) {
     myPlayerName = data.playerName;
+    isFirstPlayer = data.isFirstPlayer;
     gameState = {
-      myMoney: 100, // Initialize with starting money
+      myMoney: 100,
       turnNumber: 1,
       maxTurns: MAX_TURNS,
-      lastBid: 0,  // Initialize to 0 instead of null
+      lastBid: 0,
       isGameOver: false
     };
     
@@ -369,7 +376,22 @@ function handleLoginSuccess(data) {
     const playerNameSpan = document.getElementById("playerNameSpan");
     
     if (loginPanel) loginPanel.style.display = "none";
-    if (gamePanel) gamePanel.style.display = "block";
+    if (gamePanel) {
+      gamePanel.style.display = "block";
+      
+      // Show passcode reminder for first player
+      if (isFirstPlayer) {
+        const passcodeDisplay = document.createElement('div');
+        passcodeDisplay.className = 'passcode-display';
+        passcodeDisplay.innerHTML = `
+          <div class="passcode-box">
+            <span>Your passcode for Player 2: <strong>${data.passcode}</strong></span>
+            <button onclick="copyPasscode('${data.passcode}')" class="copy-btn">Copy</button>
+          </div>
+        `;
+        gamePanel.insertBefore(passcodeDisplay, gamePanel.firstChild);
+      }
+    }
     if (playerNameSpan) playerNameSpan.textContent = myPlayerName;
     
     // Update UI elements
@@ -377,6 +399,9 @@ function handleLoginSuccess(data) {
     updateBidInput();
     
     showStatus(`Logged in with $${gameState.myMoney}`);
+    if (isFirstPlayer) {
+      showStatus(`Share your passcode with Player 2: ${data.passcode}`);
+    }
     
     // Initialize canvas
     if (canvas) {
@@ -387,13 +412,6 @@ function handleLoginSuccess(data) {
     
     // Request initial leaderboard data
     requestLeaderboard();
-
-    // If there's a pending AI login (Human vs AI mode), send it now
-    if (window.pendingAILogin) {
-      console.log("Sending pending AI login...");
-      ws.send(JSON.stringify(window.pendingAILogin));
-      window.pendingAILogin = null;
-    }
   } else {
     // For AI logins, store the player names
     if (data.playerName === AI_NAMES.CLAUDE) {
@@ -458,55 +476,54 @@ function handleGameState(data) {
 }
 
 function handleTurnResolution(data) {
-  console.log("Turn resolved:", data);
-  
-  // Update game state
-  if (!isAudience) {
-    gameState.turnNumber = data.turnNumber;
-    gameState.maxTurns = data.maxTurns;
-    gameState.myMoney = data.money;
-    gameState.lastBid = data.lastBid || 0;
+    console.log("Turn resolved:", data);
     
-    // Update UI elements
-    updatePlayerStats();
-    updateBidInput();
-  }
-
-  // Get positions for animation
-  const oldPos = data.oldPosition;
-  const newPos = data.newPosition;
-  
-  // Update turn display
-  const turnDisplay = document.getElementById("turnDisplay");
-  if (turnDisplay) {
-    turnDisplay.textContent = `Turn ${data.turnNumber} of ${data.maxTurns}`;
-  }
-
-  // Show turn result in status
-  const winnerName = data.winner === 1 ? p1Name : p2Name;
-  if (data.tieUsed) {
-    showStatus(`Tie! ${winnerName} won due to advantage`);
-  } else {
-    showStatus(`${winnerName} won the turn!`);
-  }
-
-  // Show bid information if enabled
-  if (showBidsMode) {
-    showStatus(`${p1Name} bid: $${data.p1Bid}, ${p2Name} bid: $${data.p2Bid}`);
-  }
-  
-  // Animate the scotch movement
-  console.log("Animating from", oldPos, "to", newPos);
-  animateScotchMove(oldPos, newPos, () => {
-    scotchPosition = newPos;
-    if (data.gameOver && !isAudience) {
-      gameState.isGameOver = true;
-      gameState.myMoney = data.money;
-      gameState.lastBid = data.lastBid || 0;
-      updatePlayerStats();
-      updateBidInput();
+    // Update game state with proper initialization
+    if (!isAudience) {
+        // Determine if we're player 1 or 2
+        const isPlayer1 = myPlayerName === data.p1Name;
+        
+        gameState = {
+            ...gameState,
+            turnNumber: data.turnNumber,
+            maxTurns: data.maxTurns,
+            myMoney: isPlayer1 ? data.p1MoneyAfter : data.p2MoneyAfter,
+            lastBid: isPlayer1 ? data.p1Bid : data.p2Bid
+        };
+        
+        // Update UI elements
+        updatePlayerStats();
+        updateBidInput();
     }
-  });
+
+    // Get positions for animation
+    const oldPos = data.oldPosition;
+    const newPos = data.newPosition;
+    
+    // Update turn display
+    const turnDisplay = document.getElementById("turnDisplay");
+    if (turnDisplay) {
+        turnDisplay.textContent = `Turn ${data.turnNumber} of ${data.maxTurns}`;
+    }
+
+    // Show turn result in status
+    const winnerName = data.winner === 1 ? data.p1Name : data.p2Name;
+    if (data.tieUsed) {
+        showStatus(`Tie! ${winnerName} won due to advantage`);
+    } else {
+        showStatus(`${winnerName} won the turn!`);
+    }
+
+    // Show bid information if enabled
+    if (showBidsMode) {
+        showStatus(`${data.p1Name} bid: $${data.p1Bid}, ${data.p2Name} bid: $${data.p2Bid}`);
+    }
+    
+    // Animate the scotch movement
+    console.log("Animating from", oldPos, "to", newPos);
+    animateScotchMove(oldPos, newPos, () => {
+        scotchPosition = newPos;
+    });
 }
 
 function handlePlayerUpdate(data) {
@@ -547,30 +564,34 @@ function handleGameOver(data) {
   finalTurnHistory = data.turnHistory;
   if (!isAudience) {
     gameState.finalState = data.finalState;
-    gameState.myMoney = data.finalState[myPlayerName === data.finalState.p1Name ? 'p1MoneyAfter' : 'p2MoneyAfter'];
+    if (data.finalState && data.finalState.p1Name && data.finalState.p2Name) {
+      gameState.myMoney = data.finalState[myPlayerName === data.finalState.p1Name ? 'p1MoneyAfter' : 'p2MoneyAfter'];
+    }
   }
   showStatus("Game Over!");
   document.getElementById("replaySection").style.display = "block";
   
-  // Handle rating changes
+  // Handle rating changes and winner message
   if (data.ratingChanges) {
     lastRatingChanges = data.ratingChanges;
     const winner = data.ratingChanges.winner;
     const loser = data.ratingChanges.loser;
     
-    // Show rating changes in status
-    showStatus(`🏆 ${winner.name} wins!`);
-    showStatus(`Rating changes:`);
-    showStatus(`${winner.name}: +${winner.ratingChange} (${Math.round(winner.newRating)})`);
-    showStatus(`${loser.name}: ${loser.ratingChange} (${Math.round(loser.newRating)})`);
+    // Show winner popup with detailed message
+    let winnerMessage = `Game Over! ${winner.name} wins!`;
+    if (data.finalState && data.finalState.scotchPosition !== undefined) {
+      if (data.finalState.scotchPosition <= 3) {
+        winnerMessage += "\nPlayer 1 won by reaching their goal!";
+      } else if (data.finalState.scotchPosition >= 7) {
+        winnerMessage += "\nPlayer 2 won by reaching their goal!";
+      } else {
+        winnerMessage += `\nWinner determined by final money: $${winner.newRating}`;
+      }
+    }
+    showWinnerPopup(winnerMessage);
 
-    // Always show winner popup, even in AI vs AI mode
-    showWinnerPopup(winner.name);
-  }
-  
-  // If there's a disconnect field, show that
-  if (data.disconnect) {
-    showStatus(`Player [${data.disconnect}] disconnected. Game ended.`);
+    // Update status with rating changes
+    showStatus(`${winner.name} (${winner.oldRating} → ${winner.newRating}) defeats ${loser.name} (${loser.oldRating} → ${loser.newRating})`);
   }
 }
 
@@ -579,87 +600,52 @@ function handleGameOver(data) {
 //////////////////////////////////////////////////
 // Login as player
 function loginAsPlayer() {
-    const nameInput = document.getElementById("nameInput");
-    const passInput = document.getElementById("passInput");
+  const nameInput = document.getElementById("nameInput");
+  const passcodeInput = document.getElementById("passcodeInput");
   const showBidsCheck = document.getElementById("showBidsCheck");
-    const gameModeRadios = document.getElementsByName("gameMode");
-    let selectedMode = 'human';
-    
-    for (const radio of gameModeRadios) {
-        if (radio.checked) {
-            selectedMode = radio.value;
-            break;
-        }
-    }
   
-    if (!nameInput.value) {
-        showError('Please enter your name');
+  if (!nameInput || !nameInput.value.trim()) {
+    showError("Please enter your name");
     return;
   }
-  
-    if (selectedMode === 'ai_vs_ai') {
-        handleAIvsAILogin();
+
+  if (!passcodeInput || !passcodeInput.value.trim()) {
+    showError("Please enter a passcode");
     return;
   }
-  
-    const isAI = false;
-    const aiType = null;
-    const isFirstPlayer = !window.waitingPlayer;
-    
-    const loginMessage = {
-        type: 'LOGIN',
-        playerName: nameInput.value,
-        passcode: passInput.value,
-        showBids: showBidsCheck.checked,
-        isAI,
-        aiType,
-        isFirstPlayer
-    };
-    
-    ws.send(JSON.stringify(loginMessage));
+
+  const playerName = nameInput.value.trim();
+  const passcode = passcodeInput.value.trim();
+  const showBids = showBidsCheck ? showBidsCheck.checked : false;
+
+  // Send login request
+  ws.send(JSON.stringify({
+    type: 'LOGIN',
+    playerName: playerName,
+    passcode: passcode,
+    showBids: showBids
+  }));
 }
 
-function handleAIvsAILogin() {
-    console.log('Starting AI vs AI match');
-    // First AI player login
-    ws.send(JSON.stringify({
-        type: 'LOGIN',
-        playerName: 'Claude',
-        passcode: 'ai_match',
-        showBids: true,
-        isAI: true,
-        aiType: 'claude',
-        isFirstPlayer: true
-    }));
+// Add passcode input to login panel
+document.addEventListener('DOMContentLoaded', function() {
+  const loginPanel = document.getElementById("loginPanel");
+  if (loginPanel) {
+    const passcodeDiv = document.createElement('div');
+    passcodeDiv.className = 'input-group';
+    passcodeDiv.innerHTML = `
+      <label for="passcodeInput">Passcode:</label>
+      <input type="text" id="passcodeInput" placeholder="Set passcode if first player, or enter existing passcode">
+      <small>First player: Set a passcode for second player to join with.</small>
+    `;
     
-    // Second AI player login after a short delay
-    setTimeout(() => {
-        ws.send(JSON.stringify({
-            type: 'LOGIN',
-            playerName: 'GPT-4',
-            passcode: 'ai_match',
-            showBids: true,
-            isAI: true,
-            aiType: 'openai',
-            isFirstPlayer: false
-        }));
-        
-        // Start the game after both AIs have joined
-        setTimeout(() => {
-            ws.send(JSON.stringify({
-                type: 'START_GAME',
-                playerName: 'Claude'
-            }));
-            
-            // Join as audience to watch
-            setTimeout(() => {
-                ws.send(JSON.stringify({
-                    type: 'AUDIENCE_JOIN'
-                }));
-            }, 500);
-        }, 1000);
-    }, 1000);
-}
+    // Insert passcode input after name input
+    const nameInput = document.querySelector('.input-group');
+    if (nameInput) {
+      nameInput.parentNode.insertBefore(passcodeDiv, nameInput.nextSibling);
+    }
+  }
+});
 
 // Join as audience
 function joinAsAudience() {
@@ -846,76 +832,58 @@ function replayNextTurn() {
 }
 
 // Show winner popup
-function showWinnerPopup(winnerName) {
-  // Create popup elements
+function showWinnerPopup(message) {
   const popup = document.createElement('div');
-  popup.style.cssText = `
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: linear-gradient(135deg, #ffcc00 0%, #ff9900 100%);
-    padding: 30px;
-    border-radius: 15px;
-    box-shadow: 0 0 20px rgba(0,0,0,0.5);
-    z-index: 1000;
-    text-align: center;
-    font-family: 'Press Start 2P', monospace;
-    color: #000;
-    animation: popupAppear 0.5s ease-out;
+  popup.className = 'winner-popup';
+  popup.innerHTML = `
+    <div class="winner-content">
+      <h2>🏆 Game Over! 🏆</h2>
+      <p>${message}</p>
+      <button onclick="this.parentElement.parentElement.remove()">Close</button>
+    </div>
   `;
-
-  const trophy = document.createElement('div');
-  trophy.style.cssText = `
-    font-size: 50px;
-    margin-bottom: 20px;
-  `;
-  trophy.textContent = '🏆';
-
-  const text = document.createElement('div');
-  text.style.cssText = `
-    font-size: 24px;
-    margin-bottom: 20px;
-    white-space: nowrap;
-  `;
-  text.textContent = `${winnerName} WINS!`;
-
-  const closeButton = document.createElement('button');
-  closeButton.textContent = 'Close';
-  closeButton.style.cssText = `
-    font-family: 'Press Start 2P', monospace;
-    padding: 10px 20px;
-    cursor: pointer;
-    background: #fff;
-    border: 2px solid #000;
-    border-radius: 5px;
-  `;
-  closeButton.onclick = () => document.body.removeChild(popup);
-
-  // Add CSS animation
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes popupAppear {
-      0% { transform: translate(-50%, -50%) scale(0); }
-      70% { transform: translate(-50%, -50%) scale(1.1); }
-      100% { transform: translate(-50%, -50%) scale(1); }
-    }
-  `;
-  document.head.appendChild(style);
-
-  // Assemble and show popup
-  popup.appendChild(trophy);
-  popup.appendChild(text);
-  popup.appendChild(closeButton);
   document.body.appendChild(popup);
-
-  // Auto-close after 5 seconds
-  setTimeout(() => {
-    if (document.body.contains(popup)) {
-      document.body.removeChild(popup);
-    }
-  }, 5000);
 }
+
+// Add CSS for winner popup
+const style = document.createElement('style');
+style.textContent = `
+  .winner-popup {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+  }
+  .winner-content {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    max-width: 80%;
+  }
+  .winner-content h2 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+  }
+  .winner-content button {
+    margin-top: 15px;
+    padding: 8px 16px;
+    background: #3498db;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .winner-content button:hover {
+    background: #2980b9;
+  }
+`;
 
 // Update leaderboard display
 function updateLeaderboardDisplay(leaderboard) {
@@ -1061,3 +1029,85 @@ function showError(msg) {
   }
   showStatus(`Error: ${msg}`);
 }
+
+// Add copy passcode function
+function copyPasscode(code) {
+  navigator.clipboard.writeText(code).then(() => {
+    showStatus('Passcode copied to clipboard!');
+  }).catch(err => {
+    console.error('Failed to copy passcode:', err);
+    showStatus('Failed to copy passcode');
+  });
+}
+
+// Add CSS for passcode display
+const passcodeStyle = document.createElement('style');
+passcodeStyle.textContent = `
+  .passcode-display {
+    margin: 10px 0;
+    padding: 10px;
+    text-align: center;
+  }
+  .passcode-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: #2c3e50;
+    padding: 10px 15px;
+    border-radius: 5px;
+    color: #fff;
+  }
+  .passcode-box strong {
+    color: #ffcc00;
+    font-size: 1.2em;
+    letter-spacing: 1px;
+  }
+  .copy-btn {
+    background: #3498db;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.9em;
+  }
+  .copy-btn:hover {
+    background: #2980b9;
+  }
+`;
+
+// Add CSS for game code display
+const gameCodeStyle = document.createElement('style');
+gameCodeStyle.textContent = `
+  .game-code-display {
+    margin: 10px 0;
+    padding: 10px;
+    text-align: center;
+  }
+  .game-code-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: #2c3e50;
+    padding: 10px 15px;
+    border-radius: 5px;
+    color: #fff;
+  }
+  .game-code-box strong {
+    color: #ffcc00;
+    font-size: 1.2em;
+    letter-spacing: 1px;
+  }
+  .copy-btn {
+    background: #3498db;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.9em;
+  }
+  .copy-btn:hover {
+    background: #2980b9;
+  }
+`;
