@@ -48,7 +48,7 @@ server.listen(PORT, () => {
 // In-Memory Game State
 //////////////////////////////////
 const START_MONEY = 100;
-const MAX_TURNS = 5;
+const MAX_TURNS = 100;
 
 let gamePasscode = null;   // first player's passcode sets this
 let gameOver = false;
@@ -245,7 +245,7 @@ function resolveTurn() {
   });
 
   // Check game over conditions
-  gameOver = scotchPosition === 0 || scotchPosition === 10 || turnNumber >= MAX_TURNS;
+  gameOver = scotchPosition === 0 || scotchPosition === 10 || turnNumber >= MAX_TURNS || playerArray.every(player => player.money <= 0);
 
   // Send private updates first
   playerArray.forEach(player => {

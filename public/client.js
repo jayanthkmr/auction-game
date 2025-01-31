@@ -27,7 +27,7 @@ let finalTurnHistory = null;
 // Add this at the top with other state variables
 let gameState = {
   turnNumber: 0,
-  maxTurns: 0,
+  maxTurns: 100,
   isGameOver: false,
   myMoney: 0,
   lastBid: null
@@ -38,7 +38,7 @@ let p1Name = "P1";
 let p2Name = "P2";
 
 // Add MAX_TURNS constant at the top of the file
-const MAX_TURNS = 5;  // Match server's MAX_TURNS
+const MAX_TURNS = 100;  // Match server's MAX_TURNS
 
 // Add at the top with other state variables
 let showBidsMode = false;
@@ -302,7 +302,7 @@ function handleServerMessage(data) {
         isAudience = false;
         gameState = {
           turnNumber: 1,
-          maxTurns: 5,
+          maxTurns: 100,
           myMoney: data.money,
           lastBid: 0,
           isGameOver: false
@@ -320,9 +320,11 @@ function handleServerMessage(data) {
         myStatsDiv.textContent = `Your Money: $${gameState.myMoney} | Last Bid: $0`;
         
         // Update turn display
-        const turnDisplay = document.getElementById("turnDisplay");
-        if (turnDisplay) {
-          turnDisplay.textContent = `Turn ${gameState.turnNumber} of ${gameState.maxTurns}`;
+        const currentTurn = document.getElementById("currentTurn");
+        const maxTurns = document.getElementById("maxTurns");
+        if (currentTurn && maxTurns) {
+          currentTurn.textContent = gameState.turnNumber;
+          maxTurns.textContent = gameState.maxTurns;
         }
 
         // Update bid input max
@@ -399,9 +401,11 @@ function handleServerMessage(data) {
       scotchPosition = data.scotchPosition;
       
       // Update turn display
-      const turnDisplay = document.getElementById("turnDisplay");
-      if (turnDisplay) {
-        turnDisplay.textContent = `Turn ${gameState.turnNumber} of ${gameState.maxTurns}`;
+      const currentTurn = document.getElementById("currentTurn");
+      const maxTurns = document.getElementById("maxTurns");
+      if (currentTurn && maxTurns) {
+        currentTurn.textContent = gameState.turnNumber;
+        maxTurns.textContent = gameState.maxTurns;
       }
 
       // Show turn result in status

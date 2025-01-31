@@ -286,7 +286,7 @@
 <h1>🥃 Scotch Auction Game</h1>
 
 <!-- Add turn display -->
-<div id="turnDisplay">Turn 1 of 5</div>
+<!-- <div id="turnDisplay">Turn 1 of 5</div> -->
 
 <!-- Game Rules Panel -->
 <div id="rulesPanel" class="panel">
@@ -321,7 +321,8 @@
       <h4>🏆 Winning</h4>
       <ul>
         <li>Get bottle to your end (0 or 10)</li>
-        <li>Or have most progress after 5 turns</li>
+        <li>Or everyone runs out of money</li>
+        <li>Or have most progress after all turns</li>
         <li>Ties use alternating advantage</li>
       </ul>
     </div>
@@ -374,7 +375,7 @@
   <canvas id="gameCanvas" width="600" height="200"></canvas>
   
   <div class="bid-section">
-    <h3 class="turn-counter">Turn <span id="currentTurn">1</span>/<span id="maxTurns">5</span></h3>
+    <h3 class="turn-counter">Turn <span id="currentTurn">1</span>/<span id="maxTurns">100</span></h3>
     <label for="bidInput">Your Bid (max $100): </label>
     <input id="bidInput" class="bidField" type="text" placeholder="Enter bid amount" />
     <button onclick="submitBid()">Place Bid 💰</button>
