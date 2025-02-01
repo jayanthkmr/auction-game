@@ -134,7 +134,9 @@ async function handleAIBid(playerName) {
   
   // Get opponent info
   const playerArray = Object.values(players);
-  const opponent = playerArray.find(p => p.name !== playerName);
+  // console.log("Player array:", playerArray);
+  const opponent = playerArray.find(p => (p.name !== playerName) && (p.name !== 'Audience'));
+  const opponentPlayerNumber = playerArray.indexOf(opponent) + 1;
   if (!opponent) return;
   
   // Prepare game state for AI
@@ -142,8 +144,9 @@ async function handleAIBid(playerName) {
     myMoney: player.money,
     bottlePosition: scotchPosition,
     turnNumber,
-    maxTurns: MAX_TURNS,
-    opponentName: opponent.name
+    maxTurns: (MAX_TURNS - turnNumber) + 1,
+    opponentName: opponent.name,
+    myGoal: opponentPlayerNumber === 1 ? 10 : 0
   };
   
   try {
@@ -277,16 +280,22 @@ function resolveTurn() {
     aiPlayers[p1.name].addToHistory({
       turnNumber,
       myBid: p1.lastBid,
-      opponentBid: p2.lastBid,
-      won: winner === 1
+      opponentBid: showBidsMode ? p2.lastBid : undefined,
+      won: winner === 1,
+      myMoney: p1.money,
+      opponentMoney: showBidsMode ? p2.money : undefined,
+      bottlePosition: scotchPosition
     });
   }
   if (p2.isAI) {
     aiPlayers[p2.name].addToHistory({
       turnNumber,
       myBid: p2.lastBid,
-      opponentBid: p1.lastBid,
-      won: winner === 2
+      opponentBid: showBidsMode ? p1.lastBid : undefined,
+      won: winner === 2,
+      myMoney: p2.money,
+      opponentMoney: showBidsMode ? p1.money : undefined,
+      bottlePosition: scotchPosition
     });
   }
 

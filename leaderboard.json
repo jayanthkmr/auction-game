@@ -11,6 +11,30 @@
       "wins": 0,
       "losses": 2,
       "gamesPlayed": 2
+    },
+    "jay": {
+      "rating": 1271,
+      "wins": 5,
+      "losses": 0,
+      "gamesPlayed": 5
+    },
+    "Claude-AI": {
+      "rating": 1128,
+      "wins": 2,
+      "losses": 7,
+      "gamesPlayed": 9
+    },
+    "GPT4-AI": {
+      "rating": 1137,
+      "wins": 2,
+      "losses": 7,
+      "gamesPlayed": 9
+    },
+    "jaya": {
+      "rating": 1264,
+      "wins": 5,
+      "losses": 0,
+      "gamesPlayed": 5
     }
   }
 }
