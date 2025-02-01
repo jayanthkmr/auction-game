@@ -251,9 +251,11 @@ function resolveTurn() {
   playerArray.forEach(player => {
     sendMessage(player.ws, {
       type: "PLAYER_UPDATE",
+      playerName: player.name,
       money: player.money,
       lastBid: player.lastBid,
-      isWinner: (player === p1 && winner === 1) || (player === p2 && winner === 2)
+      isWinner: (player === p1 && winner === 1) || (player === p2 && winner === 2),
+      isAI: player.isAI
     });
   });
 

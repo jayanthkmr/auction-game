@@ -436,8 +436,8 @@ function handleServerMessage(data) {
     // Private update to me about my money + bid
     case "PLAYER_UPDATE":
       console.log("Player update for", myPlayerName, ":", data);
-      // Only update if this is for the human player
-      if (!isAudience && myPlayerName && !data.isAI) {
+      // Only update if this is for the human player and the update is meant for us
+      if (!isAudience && myPlayerName && data.playerName === myPlayerName && !data.isAI) {
         // Store previous values for logging
         const prevMoney = gameState.myMoney;
         const prevBid = gameState.lastBid;
